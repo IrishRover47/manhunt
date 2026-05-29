@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /Users/sean/.claude/projects/-Users-sean-manhunt/memory)",
+      "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(node --check src/rooms.js)",
+      "Bash(node --check src/index.js)",
+      "Bash(node src/index.js)",
+      "Bash(curl -s http://localhost:3001/health)",
+      "Bash(kill %1)",
+      "Bash(kill -9 20907)",
+      "Bash(mkdir -p /Users/sean/manhunt/server/src/game && cp /Users/sean/manhunt/web/src/game/*.js /Users/sean/manhunt/server/src/game/ && echo \"copied\")",
+      "Bash(node -e ' *)",
+      "Read(//Users/sean/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/3e87c0db-9fb5-45ae-b833-b178ee3b57d0/8c4124e5-cba6-42dc-993c-a2df4aac89a0/skills/docx/scripts/office/**)",
+      "Bash(npm list *)",
+      "Bash(cd /tmp && npm install docx 2>&1 | tail -5)",
+      "Bash(node generate_manhunt_rulebook.js)",
+      "Bash(pip3 install *)"
+    ]
+  }
+}

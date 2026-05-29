@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+web/node_modules/
+server/node_modules/
+
+# Build output
+web/dist/
+
+# Environment variables — never commit these
+.env
+.env.local
+.env*.local
+web/.env.local
+web/.env*.local
+server/.env
+
+# macOS
+.DS_Store
+
+# Generated files
+*.docx
+
+# Logs
+*.log
+npm-debug.log*
+.claude/
