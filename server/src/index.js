@@ -19,9 +19,15 @@ import {
 const app = express();
 const httpServer = createServer(app);
 
+const rawOrigin = process.env.CLIENT_ORIGIN || "*";
+const corsOrigin =
+  rawOrigin === "*"
+    ? "*"
+    : rawOrigin.split(",").map((o) => o.trim());
+
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CLIENT_ORIGIN || "*",
+    origin: corsOrigin,
     methods: ["GET", "POST"],
   },
 });
