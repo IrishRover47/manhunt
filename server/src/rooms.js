@@ -86,6 +86,7 @@ export function createRoom(socketId, name, playerToken) {
     gameState: null,
     pendingPaths: new Map(),
     turnTimerRef: null,
+    deleteTimerRef: null,
   };
 
   rooms.set(code, room);
@@ -100,6 +101,12 @@ export function joinRoom(code, socketId, name, playerToken) {
   }
   if (room.players.length >= 6 && !room.players.find((p) => p.id === playerToken)) {
     return { error: "Room is full (max 6)" };
+  }
+
+  // Cancel pending room deletion if someone is coming back.
+  if (room.deleteTimerRef) {
+    clearTimeout(room.deleteTimerRef);
+    room.deleteTimerRef = null;
   }
 
   // Reconnect: same token found in room
@@ -140,8 +147,11 @@ export function removePlayer(socketId) {
   if (player) player.socketId = null;
 
   if (room.players.every((p) => !p.socketId)) {
-    rooms.delete(room.code);
-    return null;
+    room.deleteTimerRef = setTimeout(() => {
+      rooms.delete(room.code);
+      console.log(`[room] ${room.code} expired after 2h grace period`);
+    }, 2 * 60 * 60 * 1000);
+    return room;
   }
 
   if (!room.players.some((p) => p.isHost && p.socketId)) {

@@ -117,6 +117,10 @@ io.on("connection", (socket) => {
           totalCount: rs.totalCount,
           submitted: rs.submitted,
         });
+        // Restart turn timer if game is still active and no timer is running.
+        if (!rs.state.gameOver && !room.turnTimerRef) {
+          startTurnTimer(room);
+        }
       }
       console.log(`[reconnect] ${name} rejoined ${room.code}`);
     } else {
@@ -203,7 +207,12 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     const room = removePlayer(socket.id);
     if (room) {
-      io.to(room.code).emit("room_state", { room: publicRoom(room) });
+      if (room.players.every((p) => !p.socketId)) {
+        clearTurnTimer(room);
+        console.log(`[room] ${room.code} empty — pausing, expires in 2h`);
+      } else {
+        io.to(room.code).emit("room_state", { room: publicRoom(room) });
+      }
     }
     console.log("[disconnect]", socket.id);
   });
