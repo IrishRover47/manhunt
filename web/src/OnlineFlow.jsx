@@ -64,6 +64,19 @@ export function OnlineFlow({ onPlayLocal }) {
   // ── Animation state ───────────────────────────────────────────────────────
   const [animTick, setAnimTick] = useState(null);
 
+  // ── Re-join on Socket.IO reconnect ───────────────────────────────────────
+  // Socket.IO auto-reconnects with a new socket ID — re-announce ourselves
+  // so the server updates the player's socketId in the room.
+  useEffect(() => {
+    if (!room?.code) return;
+    const socket = getSocket();
+    function onConnect() {
+      socket.emit("join_room", { code: room.code, name, playerToken: getPlayerToken() });
+    }
+    socket.on("connect", onConnect);
+    return () => socket.off("connect", onConnect);
+  }, [room?.code, name]);
+
   // ── Socket event listeners ────────────────────────────────────────────────
   useEffect(() => {
     if (screen === "menu") return;
