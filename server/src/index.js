@@ -14,7 +14,10 @@ import {
   filteredTickSnaps,
   resolveTurnInRoom,
   reconnectState,
+  addBotToRoom,
+  removeBotFromRoom,
 } from "./rooms.js";
+import { chooseBotPath } from "./bot.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -62,6 +65,34 @@ function clearTurnTimer(room) {
   }
 }
 
+// ── Bot path submission ───────────────────────────────────────────────────────
+
+function submitBotPaths(room) {
+  const gs = room.gameState;
+  if (!gs || gs.gameOver) return;
+
+  const bots = room.players.filter((p) => p.isBot);
+  for (const bot of bots) {
+    const gsPlayer = gs.players.find((p) => p.id === bot.id);
+    if (!gsPlayer) continue;
+    if (gsPlayer.role === "HUNTER" && gs.headStartTurnsLeft > 0) continue;
+    if (room.pendingPaths.has(bot.id)) continue;
+    room.pendingPaths.set(bot.id, chooseBotPath(room, bot.id));
+  }
+
+  const eligibleIds = gs.players
+    .filter((p) => !(p.role === "HUNTER" && gs.headStartTurnsLeft > 0))
+    .map((p) => p.id);
+  const readyCount = room.pendingPaths.size;
+  const totalCount = eligibleIds.length;
+  io.to(room.code).emit("ready_count", { readyCount, totalCount, submitted: false });
+
+  if (readyCount >= totalCount) {
+    clearTurnTimer(room);
+    broadcastTurnResult(room);
+  }
+}
+
 // ── Turn resolution + broadcast ───────────────────────────────────────────────
 
 function broadcastTurnResult(room) {
@@ -79,7 +110,10 @@ function broadcastTurnResult(room) {
       (gameOver ? ` GAME OVER: ${gameOver.winner} wins` : "")
   );
 
-  if (!gameOver) startTurnTimer(room);
+  if (!gameOver) {
+    startTurnTimer(room);
+    submitBotPaths(room);
+  }
 }
 
 // ── Socket.io event handlers ──────────────────────────────────────────────────
@@ -120,6 +154,7 @@ io.on("connection", (socket) => {
         // Restart turn timer if game is still active and no timer is running.
         if (!rs.state.gameOver && !room.turnTimerRef) {
           startTurnTimer(room);
+          submitBotPaths(room);
         }
       }
       console.log(`[reconnect] ${name} rejoined ${room.code}`);
@@ -142,6 +177,22 @@ io.on("connection", (socket) => {
     const room = updateRoomSettings(socket.id, updates);
     if (!room) return;
     io.to(room.code).emit("room_state", { room: publicRoom(room) });
+  });
+
+  // ── Lobby: bot management (host only) ────────────────────────────────────
+  socket.on("add_bot", ({ role } = {}) => {
+    const room = getRoomBySocket(socket.id);
+    if (!room) return;
+    const result = addBotToRoom(room.code, socket.id, role);
+    if (result.error) { socket.emit("room_error", { message: result.error }); return; }
+    io.to(room.code).emit("room_state", { room: publicRoom(result.room) });
+  });
+
+  socket.on("remove_bot", ({ botId } = {}) => {
+    const room = getRoomBySocket(socket.id);
+    if (!room) return;
+    const updated = removeBotFromRoom(room.code, socket.id, botId);
+    if (updated) io.to(room.code).emit("room_state", { room: publicRoom(updated) });
   });
 
   // ── Game: start (host only) ────────────────────────────────────────────────
@@ -169,6 +220,7 @@ io.on("connection", (socket) => {
     io.to(room.code).emit("room_state", { room: publicRoom(room) });
 
     startTurnTimer(room);
+    submitBotPaths(room);
     console.log(`[game] started in ${room.code}`);
   });
 
@@ -207,7 +259,7 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     const room = removePlayer(socket.id);
     if (room) {
-      if (room.players.every((p) => !p.socketId)) {
+      if (room.players.filter((p) => !p.isBot).every((p) => !p.socketId)) {
         clearTurnTimer(room);
         console.log(`[room] ${room.code} empty — pausing, expires in 2h`);
       } else {

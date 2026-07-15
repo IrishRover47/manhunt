@@ -356,16 +356,17 @@ export function OnlineFlow({ onPlayLocal }) {
             return (
               <div key={p.id} style={{
                 padding: 12,
-                border: `1px solid ${isMe ? "#1565c0" : "#ddd"}`,
+                border: `1px solid ${isMe ? "#1565c0" : p.isBot ? "#bdbdbd" : "#ddd"}`,
                 borderRadius: 8,
-                background: isMe ? "#e8f4fd" : "white",
+                background: isMe ? "#e8f4fd" : p.isBot ? "#fafafa" : "white",
                 opacity: p.connected ? 1 : 0.5,
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 700, minWidth: 80 }}>
                     {isMe ? `${p.name} (you)` : p.name}
                     {p.isHost && <span style={{ marginLeft: 6, fontSize: 11, color: "#888", fontWeight: 400 }}>HOST</span>}
-                    {!p.connected && <span style={{ marginLeft: 6, fontSize: 11, color: "#f57c00" }}>disconnected</span>}
+                    {p.isBot && <span style={{ marginLeft: 6, fontSize: 11, color: "#555", fontWeight: 400, background: "#e0e0e0", padding: "1px 5px", borderRadius: 3 }}>BOT</span>}
+                    {!p.connected && !p.isBot && <span style={{ marginLeft: 6, fontSize: 11, color: "#f57c00" }}>disconnected</span>}
                   </span>
                   {isMe ? (
                     <>
@@ -393,6 +394,12 @@ export function OnlineFlow({ onPlayLocal }) {
                         color: "white", fontSize: 13, fontWeight: 700,
                         display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
                       }}>{p.token}</div>
+                      {p.isBot && isHost && (
+                        <button onClick={() => getSocket().emit("remove_bot", { botId: p.id })}
+                          style={{ marginLeft: "auto", fontSize: 13, padding: "2px 8px", borderRadius: 4, border: "1px solid #ccc", background: "white", cursor: "pointer", color: "#c62828" }}>
+                          Remove
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -400,6 +407,20 @@ export function OnlineFlow({ onPlayLocal }) {
             );
           })}
         </div>
+
+        {isHost && room.players.length < 6 && (
+          <div style={{ marginBottom: 24, display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 13, color: "#555", fontWeight: 600 }}>Add bot:</span>
+            <button onClick={() => getSocket().emit("add_bot", { role: "HUNTER" })}
+              style={btn("#ffebee", "#c62828", { fontSize: 13, padding: "6px 14px", border: "1px solid #ef9a9a" })}>
+              + Hunter Bot
+            </button>
+            <button onClick={() => getSocket().emit("add_bot", { role: "RUNNER" })}
+              style={btn("#e3f2fd", "#1565c0", { fontSize: 13, padding: "6px 14px", border: "1px solid #90caf9" })}>
+              + Runner Bot
+            </button>
+          </div>
+        )}
 
         {isHost && (
           <div style={{ marginBottom: 24 }}>

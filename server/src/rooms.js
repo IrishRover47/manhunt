@@ -54,7 +54,8 @@ export function publicRoom(room) {
       classKey: p.classKey,
       token: p.token,
       isHost: p.isHost,
-      connected: !!p.socketId,
+      isBot: !!p.isBot,
+      connected: p.isBot ? true : !!p.socketId,
     })),
   };
 }
@@ -146,7 +147,7 @@ export function removePlayer(socketId) {
   const player = room.players.find((p) => p.socketId === socketId);
   if (player) player.socketId = null;
 
-  if (room.players.every((p) => !p.socketId)) {
+  if (room.players.filter((p) => !p.isBot).every((p) => !p.socketId)) {
     room.deleteTimerRef = setTimeout(() => {
       rooms.delete(room.code);
       console.log(`[room] ${room.code} expired after 2h grace period`);
@@ -350,6 +351,46 @@ export function resolveTurnInRoom(room) {
   room.pendingPaths = new Map();
 
   return { tickSnapshots, gameOver };
+}
+
+// ── Bot management ────────────────────────────────────────────────────────────
+
+let _botSeq = 0;
+
+export function addBotToRoom(code, hostSocketId, role) {
+  const room = rooms.get(code?.toUpperCase());
+  if (!room) return { error: "Room not found" };
+  if (room.status !== "lobby") return { error: "Game already started" };
+  const host = room.players.find((p) => p.socketId === hostSocketId);
+  if (!host?.isHost) return { error: "Not host" };
+  if (room.players.length >= 6) return { error: "Room is full (max 6)" };
+  if (!["HUNTER", "RUNNER"].includes(role)) return { error: "Invalid role" };
+
+  const label = role === "HUNTER" ? "Hunter" : "Runner";
+  const player = {
+    id: uuidv4(),
+    socketId: null,
+    name: `${label} Bot ${++_botSeq}`,
+    role,
+    classKey: "STANDARD",
+    token: role === "HUNTER" ? "H" : "R",
+    isBot: true,
+    isHost: false,
+    botMemory: {},
+  };
+  room.players.push(player);
+  return { room };
+}
+
+export function removeBotFromRoom(code, hostSocketId, botId) {
+  const room = rooms.get(code?.toUpperCase());
+  if (!room || room.status !== "lobby") return null;
+  const host = room.players.find((p) => p.socketId === hostSocketId);
+  if (!host?.isHost) return null;
+  const idx = room.players.findIndex((p) => p.id === botId && p.isBot);
+  if (idx === -1) return null;
+  room.players.splice(idx, 1);
+  return room;
 }
 
 // ── Reconnect state ───────────────────────────────────────────────────────────
