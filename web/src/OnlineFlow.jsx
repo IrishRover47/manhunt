@@ -57,6 +57,7 @@ export function OnlineFlow({ onPlayLocal }) {
 
   // ── Turn planning state ───────────────────────────────────────────────────
   const [localPath, setLocalPath] = useState([]);
+  const [plannedFacing, setPlannedFacing] = useState(null); // null → use myPlayer.facing
   const [submitted, setSubmitted] = useState(false);
   const [readyCount, setReadyCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
@@ -103,6 +104,7 @@ export function OnlineFlow({ onPlayLocal }) {
       setGameOver(state.gameOver);
       setTurnLimit(room?.turnLimit ?? 20);
       setLocalPath([]);
+      setPlannedFacing(null);
       setSubmitted(false);
       setReadyCount(0);
       setAnimTick(null);
@@ -147,6 +149,7 @@ export function OnlineFlow({ onPlayLocal }) {
       setHeadStartTurnsLeft(finalState.headStartTurnsLeft);
       setGameOver(finalState.gameOver);
       setLocalPath([]);
+      setPlannedFacing(null);
       setSubmitted(false);
       setReadyCount(0);
       setTotalCount(0);
@@ -162,25 +165,44 @@ export function OnlineFlow({ onPlayLocal }) {
   }, [animTick]);
 
   // ── Path planning ─────────────────────────────────────────────────────────
+
+  // Returns the last actual position in the planned path (skipping look steps).
+  function getLastPos() {
+    for (let i = localPath.length - 1; i >= 0; i--) {
+      if (!localPath[i].look) return { x: localPath[i].x, y: localPath[i].y };
+    }
+    return { x: myPlayer.x, y: myPlayer.y };
+  }
+
   function tryAddStep(toX, toY) {
     if (!mapData || !myPlayer || submitted || animTick) return;
     if (myPlayer.role === "HUNTER" && headStartTurnsLeft > 0) return;
 
     const classInfo = CLASSES[myPlayer.classKey] ?? CLASSES.STANDARD;
-    if (localPath.length >= classInfo.maxSteps) return;
-
-    const last = localPath.length
-      ? localPath[localPath.length - 1]
-      : { x: myPlayer.x, y: myPlayer.y };
-
-    const dx = toX - last.x;
-    const dy = toY - last.y;
+    const lastPos = getLastPos();
+    const dx = toX - lastPos.x;
+    const dy = toY - lastPos.y;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1 || (dx === 0 && dy === 0)) return;
-    if (!canMoveTo(last.x, last.y, toX, toY, mapData)) return;
 
-    if (plannedCost(myPlayer.classKey, localPath.length + 1) > myPlayer.stamina) return;
+    const newFacing = Math.atan2(dy, dx) * (180 / Math.PI);
+    const curFacing = plannedFacing ?? myPlayer.facing;
+    const isLook = Math.abs(newFacing - curFacing) > 0.01;
+
+    if (isLook) {
+      // Turn in place — free, no stamina cost, doesn't count toward move limit.
+      setLocalPath((prev) => [...prev, { look: true, facing: newFacing }]);
+      setPlannedFacing(newFacing);
+      return;
+    }
+
+    // It's a move step — check limits.
+    const moveCount = localPath.filter((s) => !s.look).length;
+    if (moveCount >= classInfo.maxSteps) return;
+    if (!canMoveTo(lastPos.x, lastPos.y, toX, toY, mapData)) return;
+    if (plannedCost(myPlayer.classKey, moveCount + 1) > myPlayer.stamina) return;
 
     setLocalPath((prev) => [...prev, { x: toX, y: toY }]);
+    setPlannedFacing(newFacing);
   }
 
   useEffect(() => {
@@ -189,14 +211,12 @@ export function OnlineFlow({ onPlayLocal }) {
       if (submitted || animTick) return;
       const dir = directions[e.key.toLowerCase()];
       if (!dir || !myPlayer) return;
-      const last = localPath.length
-        ? localPath[localPath.length - 1]
-        : { x: myPlayer.x, y: myPlayer.y };
+      const last = getLastPos();
       tryAddStep(last.x + dir.dx, last.y + dir.dy);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [screen, myPlayer, localPath, submitted, animTick, headStartTurnsLeft]);
+  }, [screen, myPlayer, localPath, plannedFacing, submitted, animTick, headStartTurnsLeft]);
 
   // ── Lobby actions ─────────────────────────────────────────────────────────
   function handleCreate() {
@@ -507,8 +527,9 @@ export function OnlineFlow({ onPlayLocal }) {
 
     const canAct = !(myPlayer.role === "HUNTER" && headStartTurnsLeft > 0);
     const classInfo = CLASSES[myPlayer.classKey] ?? CLASSES.STANDARD;
-    const stepsLeft = classInfo.maxSteps - localPath.length;
-    const staminaAfter = myPlayer.stamina - plannedCost(myPlayer.classKey, localPath.length);
+    const moveCount = localPath.filter((s) => !s.look).length;
+    const stepsLeft = classInfo.maxSteps - moveCount;
+    const staminaAfter = myPlayer.stamina - plannedCost(myPlayer.classKey, moveCount);
 
     return (
       <div style={{ display: "flex", gap: 16, padding: 12, fontFamily: "system-ui" }}>
@@ -532,7 +553,7 @@ export function OnlineFlow({ onPlayLocal }) {
 
                 const plannedIndex =
                   !isAnimating && !submitted
-                    ? localPath.findIndex((s) => s.x === x && s.y === y)
+                    ? localPath.filter((s) => !s.look).findIndex((s) => s.x === x && s.y === y)
                     : -1;
                 const showPlanned = plannedIndex !== -1;
 
@@ -574,7 +595,7 @@ export function OnlineFlow({ onPlayLocal }) {
 
           {/* Controls */}
           <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={() => setLocalPath([])} disabled={submitted || isAnimating || localPath.length === 0}
+            <button onClick={() => { setLocalPath([]); setPlannedFacing(null); }} disabled={submitted || isAnimating || localPath.length === 0}
               style={{ padding: "8px 14px", borderRadius: 6, cursor: "pointer" }}>
               Clear Path
             </button>
@@ -623,9 +644,7 @@ export function OnlineFlow({ onPlayLocal }) {
                   <button key={label}
                     onPointerDown={(e) => {
                       e.preventDefault();
-                      const last = localPath.length
-                        ? localPath[localPath.length - 1]
-                        : { x: myPlayer.x, y: myPlayer.y };
+                      const last = getLastPos();
                       tryAddStep(last.x + dx, last.y + dy);
                     }}
                     style={{

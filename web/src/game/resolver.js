@@ -38,11 +38,18 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
 
       const classInfo = CLASSES[p.classKey] ?? CLASSES.STANDARD;
 
+      // Look steps are instantaneous: apply facing change now, advance index, no tick cost.
+      while (p.stepIndex < p.path.length && p.path[p.stepIndex]?.look) {
+        p.facing = p.path[p.stepIndex].facing;
+        p.stepIndex += 1;
+      }
+
       if (p.stepIndex >= p.path.length) {
         proposed.set(p.id, null);
         continue;
       }
-      if (p.stepIndex >= classInfo.maxSteps) {
+      // Gate on actual moves taken, not stepIndex (look steps don't count).
+      if (p.movedSquaresThisTurn >= classInfo.maxSteps) {
         proposed.set(p.id, null);
         p.stopped = true;
         continue;
@@ -234,9 +241,11 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
     const anyoneActive = state.some((p) => {
       if (p.stopped) return false;
       if (!canMoveThisTurn(p)) return false;
-      const classInfo = CLASSES[p.classKey] ?? CLASSES.STANDARD;
       if (p.stepIndex >= p.path.length) return false;
-      if (p.stepIndex >= classInfo.maxSteps) return false;
+      // Remaining path has only look steps — they'll be consumed next tick.
+      if (p.path.slice(p.stepIndex).every((s) => s.look)) return true;
+      const classInfo = CLASSES[p.classKey] ?? CLASSES.STANDARD;
+      if (p.movedSquaresThisTurn >= classInfo.maxSteps) return false;
       const nextStepNum = p.movedSquaresThisTurn + 1;
       const cost = stepExecutionCost(p.classKey, nextStepNum);
       return p.stamina >= cost;
