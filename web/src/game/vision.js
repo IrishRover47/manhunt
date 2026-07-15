@@ -55,6 +55,12 @@ export function computeVisibleAlongPath(player, map) {
   let facing = player.facing;
 
   for (const step of player.path) {
+    if (step.look) {
+      facing = step.facing;
+      computeVisible(prev.x, prev.y, facing, map).forEach((k) => union.add(k));
+      continue;
+    }
+
     const dx = step.x - prev.x;
     const dy = step.y - prev.y;
 
