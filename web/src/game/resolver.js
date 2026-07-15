@@ -177,8 +177,10 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
       if (p) p.stopped = true;
     }
 
-    const hunters = state.filter((p) => p.role === "HUNTER" && !p.stopped);
-    const runners = state.filter((p) => p.role === "RUNNER" && !p.stopped);
+    // Headstart hunters can't tag; all other hunters can, even if their last
+    // step was blocked (e.g. by trying to step onto the runner's square).
+    const hunters = state.filter((p) => p.role === "HUNTER" && canMoveThisTurn(p));
+    const runners = state.filter((p) => p.role === "RUNNER");
 
     const tagEvents = [];
     for (const h of hunters) {
