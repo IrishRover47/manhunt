@@ -599,12 +599,15 @@ export function OnlineFlow({ onPlayLocal }) {
               style={{ padding: "8px 14px", borderRadius: 6, cursor: "pointer" }}>
               Clear Path
             </button>
-            <button onClick={handleReady} disabled={submitted || isAnimating || !canAct}
+            <button onClick={handleReady} disabled={submitted || isAnimating}
               style={{
-                padding: "8px 20px", borderRadius: 6, fontWeight: 700, cursor: "pointer",
-                background: submitted ? "#c8e6c9" : "#1565c0", color: submitted ? "#2e7d32" : "white", border: "none",
+                padding: "8px 20px", borderRadius: 6, fontWeight: 700,
+                cursor: submitted || isAnimating ? "default" : "pointer",
+                background: submitted ? "#c8e6c9" : "#1565c0",
+                color: submitted ? "#2e7d32" : "white", border: "none",
+                opacity: isAnimating ? 0.5 : 1,
               }}>
-              {submitted ? "✓ Submitted" : "Ready →"}
+              {submitted ? "✓ Waiting…" : canAct ? "Ready →" : "Pass turn →"}
             </button>
             {isAnimating && (
               <span style={{ fontSize: 13, color: "#888", alignSelf: "center" }}>

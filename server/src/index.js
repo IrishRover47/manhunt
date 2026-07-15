@@ -83,7 +83,7 @@ function submitBotPaths(room) {
   const eligibleIds = gs.players
     .filter((p) => !(p.role === "HUNTER" && gs.headStartTurnsLeft > 0))
     .map((p) => p.id);
-  const readyCount = room.pendingPaths.size;
+  const readyCount = eligibleIds.filter((id) => room.pendingPaths.has(id)).length;
   const totalCount = eligibleIds.length;
   io.to(room.code).emit("ready_count", { readyCount, totalCount, submitted: false });
 
@@ -235,16 +235,13 @@ io.on("connection", (socket) => {
     const gs = room.gameState;
     if (!gs || gs.gameOver) return;
 
-    // Ignore if hunter is in head-start (can't act yet).
-    if (player.role === "HUNTER" && gs.headStartTurnsLeft > 0) return;
-
     room.pendingPaths.set(player.id, Array.isArray(path) ? path : []);
 
     // Broadcast ready count to all players in the room.
     const eligibleIds = gs.players
       .filter((p) => !(p.role === "HUNTER" && gs.headStartTurnsLeft > 0))
       .map((p) => p.id);
-    const readyCount = room.pendingPaths.size;
+    const readyCount = eligibleIds.filter((id) => room.pendingPaths.has(id)).length;
     const totalCount = eligibleIds.length;
 
     io.to(room.code).emit("ready_count", { readyCount, totalCount, submitted: false });
