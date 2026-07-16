@@ -110,10 +110,15 @@ export function chooseBotPath(room, playerId) {
         }
       }
     } else {
-      // RUNNER: flee visible hunters; otherwise wander.
-      next = visibleEnemies.length
-        ? fleeStep(cx, cy, visibleEnemies, map)
-        : wander(cx, cy, map);
+      // RUNNER: flee visible hunters, then last-known positions, then wander.
+      if (visibleEnemies.length) {
+        next = fleeStep(cx, cy, visibleEnemies, map);
+      } else {
+        const knownPositions = Object.values(mem);
+        next = knownPositions.length
+          ? fleeStep(cx, cy, knownPositions, map)
+          : wander(cx, cy, map);
+      }
     }
 
     if (!next) break;

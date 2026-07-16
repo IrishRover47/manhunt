@@ -228,6 +228,11 @@ export function initGame(room) {
   for (const runner of runnerSetups) {
     const info = CLASSES[runner.classKey] ?? CLASSES.STANDARD;
     const spawn = findSpawn(gamePlayers, mapData, startPos, spawnRadius);
+    // Bot runners face toward the hunter so they see the threat immediately.
+    // Human runners keep facing 180 (away) — they control direction manually.
+    const facing = runner.isBot
+      ? Math.atan2(startY - spawn.y, startX - spawn.x) * 180 / Math.PI
+      : 180;
     gamePlayers.push({
       id: runner.id,
       name: runner.name,
@@ -236,11 +241,17 @@ export function initGame(room) {
       classKey: runner.classKey,
       x: spawn.x,
       y: spawn.y,
-      facing: 180,
+      facing,
       stamina: info.staminaMax,
       path: [],
       ready: false,
     });
+    // Seed bot memory with the hunter's starting position so the bot keeps
+    // fleeing even after it moves away and can no longer see the hunter.
+    if (runner.isBot) {
+      if (!runner.botMemory) runner.botMemory = {};
+      runner.botMemory[hunterSetup.id] = { x: startX, y: startY };
+    }
   }
 
   room.gameState = {
