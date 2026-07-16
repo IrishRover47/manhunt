@@ -111,8 +111,6 @@ export function chooseBotPath(room, playerId) {
   const roomPlayer = room.players.find((p) => p.id === playerId);
   if (!gsPlayer || !roomPlayer) return [];
 
-  console.log(`[bot] chooseBotPath ${playerId} role=${gsPlayer.role} x=${gsPlayer.x} y=${gsPlayer.y} stamina=${gsPlayer.stamina}`);
-
   const classInfo = CLASSES[gsPlayer.classKey] ?? CLASSES.STANDARD;
   if (!roomPlayer.botMemory) roomPlayer.botMemory = {};
   const mem = roomPlayer.botMemory;
@@ -142,8 +140,20 @@ export function chooseBotPath(room, playerId) {
 
   const path = [];
   let cx = gsPlayer.x, cy = gsPlayer.y;
+  // Runners cap steps to leave room for stamina recovery each turn.
+  // Hunters use their full speed.
+  const stepsPerTurn = gsPlayer.role === "RUNNER"
+    ? Math.max(1, classInfo.maxSteps - Math.ceil(classInfo.maxSteps / 3))
+    : classInfo.maxSteps;
 
-  for (let step = 0; step < classInfo.maxSteps; step++) {
+  // Pre-compute threats once for the whole turn (vision doesn't change mid-path).
+  const activeThreat = gsPlayer.role === "RUNNER"
+    ? (visibleEnemies.length
+        ? visibleEnemies
+        : Object.entries(mem).filter(([k]) => k !== "_patrol").map(([, p]) => p))
+    : [];
+
+  for (let step = 0; step < stepsPerTurn; step++) {
     if (plannedCost(gsPlayer.classKey, step + 1) > gsPlayer.stamina) break;
 
     let next = null;
@@ -176,14 +186,17 @@ export function chooseBotPath(room, playerId) {
         }
       }
     } else {
-      // RUNNER: navigate toward the pre-computed safe destination.
+      // RUNNER: navigate toward the pre-computed safe destination, but never
+      // take a step that brings the bot closer to a known threat.
       if (runnerDest) {
-        next = stepToward(cx, cy, runnerDest.x, runnerDest.y, map)
-          ?? fleeStep(cx, cy,
-              visibleEnemies.length
-                ? visibleEnemies
-                : Object.entries(mem).filter(([k]) => k !== "_patrol").map(([, p]) => p),
-              map);
+        const towardDest = stepToward(cx, cy, runnerDest.x, runnerDest.y, map);
+        if (towardDest && activeThreat.length) {
+          const curDist = Math.min(...activeThreat.map((t) => manhattan(cx, cy, t.x, t.y)));
+          const nxtDist = Math.min(...activeThreat.map((t) => manhattan(towardDest.x, towardDest.y, t.x, t.y)));
+          next = nxtDist >= curDist ? towardDest : fleeStep(cx, cy, activeThreat, map);
+        } else {
+          next = towardDest ?? fleeStep(cx, cy, activeThreat, map);
+        }
       } else {
         next = wander(cx, cy, map);
       }
