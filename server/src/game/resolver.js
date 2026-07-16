@@ -222,7 +222,7 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
         creditedHunter.stopped = true;
         r.stopped = true;
         r.nextRole = "HUNTER";
-        catches.push({ id: r.id, name: r.name, token: r.token });
+        catches.push({ id: r.id, name: r.name, token: r.token, caughtBy: creditedHunter.name });
       }
     }
 

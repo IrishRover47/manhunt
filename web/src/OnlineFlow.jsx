@@ -559,7 +559,7 @@ export function OnlineFlow({ onPlayLocal }) {
               boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
               whiteSpace: "nowrap",
             }}>
-              {n.name} was caught!
+              {n.caughtBy} caught {n.name}!
             </div>
           ))}
         </div>
