@@ -77,7 +77,12 @@ function submitBotPaths(room) {
     if (!gsPlayer) continue;
     if (gsPlayer.role === "HUNTER" && gs.headStartTurnsLeft > 0) continue;
     if (room.pendingPaths.has(bot.id)) continue;
-    room.pendingPaths.set(bot.id, chooseBotPath(room, bot.id));
+    try {
+      room.pendingPaths.set(bot.id, chooseBotPath(room, bot.id));
+    } catch (err) {
+      console.error(`[bot] chooseBotPath threw for ${bot.id} (${gsPlayer.role}):`, err);
+      room.pendingPaths.set(bot.id, []);
+    }
   }
 
   const eligibleIds = gs.players
