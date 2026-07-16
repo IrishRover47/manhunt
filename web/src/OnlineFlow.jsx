@@ -54,6 +54,8 @@ export function OnlineFlow({ onPlayLocal }) {
   const [turnLimit, setTurnLimit] = useState(20);
   const [headStartTurnsLeft, setHeadStartTurnsLeft] = useState(3);
   const [gameOver, setGameOver] = useState(null);
+  const [playerCounts, setPlayerCounts] = useState({ hunters: 0, runners: 0 });
+  const [catchNotices, setCatchNotices] = useState([]);
 
   // ── Turn planning state ───────────────────────────────────────────────────
   const [localPath, setLocalPath] = useState([]);
@@ -102,17 +104,19 @@ export function OnlineFlow({ onPlayLocal }) {
       setTurn(state.turn);
       setHeadStartTurnsLeft(state.headStartTurnsLeft);
       setGameOver(state.gameOver);
+      setPlayerCounts(state.playerCounts ?? { hunters: 0, runners: 0 });
       setTurnLimit(room?.turnLimit ?? 20);
       setLocalPath([]);
       setPlannedFacing(null);
       setSubmitted(false);
       setReadyCount(0);
       setAnimTick(null);
+      setCatchNotices([]);
       setScreen("game");
     }
 
-    function onTurnResult({ tickSnapshots, finalState }) {
-      setAnimTick({ snapshots: tickSnapshots, currentIndex: 0, finalState });
+    function onTurnResult({ tickSnapshots, finalState, catches }) {
+      setAnimTick({ snapshots: tickSnapshots, currentIndex: 0, finalState, catches: catches ?? [] });
     }
 
     function onReadyCount({ readyCount, totalCount }) {
@@ -142,16 +146,26 @@ export function OnlineFlow({ onPlayLocal }) {
     if (!animTick) return;
 
     if (animTick.currentIndex >= animTick.snapshots.length) {
-      const { finalState } = animTick;
+      const { finalState, catches } = animTick;
       setMyPlayer(finalState.yourPlayer);
       setVisiblePlayers(finalState.visiblePlayers);
       setTurn(finalState.turn);
       setHeadStartTurnsLeft(finalState.headStartTurnsLeft);
       setGameOver(finalState.gameOver);
+      setPlayerCounts(finalState.playerCounts ?? { hunters: 0, runners: 0 });
       setLocalPath([]);
       setPlannedFacing(null);
       setSubmitted(false);
       setAnimTick(null);
+
+      if (catches?.length) {
+        const ts = Date.now();
+        const notices = catches.map((c, i) => ({ ...c, id: `${ts}-${i}` }));
+        setCatchNotices((prev) => [...prev, ...notices]);
+        notices.forEach((n) => {
+          setTimeout(() => setCatchNotices((prev) => prev.filter((x) => x.id !== n.id)), 4000);
+        });
+      }
       return;
     }
 
@@ -530,6 +544,27 @@ export function OnlineFlow({ onPlayLocal }) {
     const staminaAfter = myPlayer.stamina - plannedCost(myPlayer.classKey, moveCount);
 
     return (
+      <>
+      {catchNotices.length > 0 && (
+        <div style={{
+          position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)",
+          zIndex: 100, display: "flex", flexDirection: "column", gap: 8,
+          alignItems: "center", pointerEvents: "none",
+        }}>
+          {catchNotices.map((n) => (
+            <div key={n.id} style={{
+              background: "#b71c1c", color: "white",
+              padding: "10px 22px", borderRadius: 8, fontWeight: 700,
+              fontSize: 15, fontFamily: "system-ui",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+              whiteSpace: "nowrap",
+            }}>
+              {n.name} was caught!
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 16, padding: 12, fontFamily: "system-ui" }}>
         {/* ── Map grid ──────────────────────────────────────────────────── */}
         <div>
@@ -675,6 +710,15 @@ export function OnlineFlow({ onPlayLocal }) {
             </div>
           )}
 
+          <div style={{ marginTop: 10, display: "flex", gap: 14, fontSize: 13, fontWeight: 600 }}>
+            <span style={{ color: "#c62828" }}>
+              &#9679; {playerCounts.hunters} {playerCounts.hunters === 1 ? "Hunter" : "Hunters"}
+            </span>
+            <span style={{ color: "#1565c0" }}>
+              &#9679; {playerCounts.runners} {playerCounts.runners === 1 ? "Runner" : "Runners"}
+            </span>
+          </div>
+
           <div style={{ marginTop: 16 }}>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>
               {myPlayer.name}{" "}
@@ -714,6 +758,7 @@ export function OnlineFlow({ onPlayLocal }) {
           </button>
         </div>
       </div>
+      </>
     );
   }
 

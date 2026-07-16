@@ -13,6 +13,8 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
     nextRole: p.role,
   }));
 
+  const catches = [];
+
   const tickSnapshots = [];
 
   const maxTicks = Math.max(
@@ -220,6 +222,7 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
         creditedHunter.stopped = true;
         r.stopped = true;
         r.nextRole = "HUNTER";
+        catches.push({ id: r.id, name: r.name, token: r.token });
       }
     }
 
@@ -273,5 +276,5 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
     };
   });
 
-  return { players: resolved, tickSnapshots };
+  return { players: resolved, tickSnapshots, catches };
 }

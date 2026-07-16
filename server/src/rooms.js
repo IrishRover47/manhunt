@@ -305,6 +305,10 @@ export function filteredState(room, playerId) {
     headStartTurnsLeft: gs.headStartTurnsLeft,
     gameOver: gs.gameOver,
     mapKey: room.mapKey,
+    playerCounts: {
+      hunters: gs.players.filter((p) => p.role === "HUNTER").length,
+      runners: gs.players.filter((p) => p.role === "RUNNER").length,
+    },
   };
 }
 
@@ -334,7 +338,7 @@ export function resolveTurnInRoom(room) {
     ready: true,
   }));
 
-  const { players: resolved, tickSnapshots } = resolveTurn(
+  const { players: resolved, tickSnapshots, catches } = resolveTurn(
     playersWithPaths,
     gs.map,
     gs.headStartTurnsLeft
@@ -361,7 +365,7 @@ export function resolveTurnInRoom(room) {
   };
   room.pendingPaths = new Map();
 
-  return { tickSnapshots, gameOver };
+  return { tickSnapshots, gameOver, catches };
 }
 
 // ── Bot management ────────────────────────────────────────────────────────────
