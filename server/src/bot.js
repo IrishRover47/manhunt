@@ -111,6 +111,8 @@ export function chooseBotPath(room, playerId) {
   const roomPlayer = room.players.find((p) => p.id === playerId);
   if (!gsPlayer || !roomPlayer) return [];
 
+  console.log(`[bot] chooseBotPath ${playerId} role=${gsPlayer.role} x=${gsPlayer.x} y=${gsPlayer.y} stamina=${gsPlayer.stamina}`);
+
   const classInfo = CLASSES[gsPlayer.classKey] ?? CLASSES.STANDARD;
   if (!roomPlayer.botMemory) roomPlayer.botMemory = {};
   const mem = roomPlayer.botMemory;
