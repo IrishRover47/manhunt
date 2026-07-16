@@ -465,7 +465,7 @@ export function OnlineFlow({ onPlayLocal }) {
               </label>
               <label style={{ fontSize: 14 }}>Turn limit:{" "}
                 <select value={room.turnLimit} onChange={(e) => getSocket().emit("update_room", { turnLimit: Number(e.target.value) })}>
-                  {[15, 20, 25].map((n) => <option key={n} value={n}>{n} turns</option>)}
+                  {[15, 20, 25, 30].map((n) => <option key={n} value={n}>{n} turns</option>)}
                 </select>
               </label>
               <label style={{ fontSize: 14 }}>Head start:{" "}
