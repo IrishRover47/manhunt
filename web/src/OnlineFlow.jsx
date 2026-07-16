@@ -151,8 +151,6 @@ export function OnlineFlow({ onPlayLocal }) {
       setLocalPath([]);
       setPlannedFacing(null);
       setSubmitted(false);
-      setReadyCount(0);
-      setTotalCount(0);
       setAnimTick(null);
       return;
     }
