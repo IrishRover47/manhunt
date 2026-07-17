@@ -56,6 +56,8 @@ export function OnlineFlow({ onPlayLocal }) {
   const [gameOver, setGameOver] = useState(null);
   const [playerCounts, setPlayerCounts] = useState({ hunters: 0, runners: 0 });
   const [catchNotices, setCatchNotices] = useState([]);
+  const [perkNotices, setPerkNotices] = useState([]);
+  const [perkBoxes, setPerkBoxes] = useState([]);
 
   // ── Turn planning state ───────────────────────────────────────────────────
   const [localPath, setLocalPath] = useState([]);
@@ -105,18 +107,20 @@ export function OnlineFlow({ onPlayLocal }) {
       setHeadStartTurnsLeft(state.headStartTurnsLeft);
       setGameOver(state.gameOver);
       setPlayerCounts(state.playerCounts ?? { hunters: 0, runners: 0 });
-      setTurnLimit(room?.turnLimit ?? 20);
+      setTurnLimit(state.turnLimit ?? 20);
+      setPerkBoxes(state.perkBoxes ?? []);
       setLocalPath([]);
       setPlannedFacing(null);
       setSubmitted(false);
       setReadyCount(0);
       setAnimTick(null);
       setCatchNotices([]);
+      setPerkNotices([]);
       setScreen("game");
     }
 
-    function onTurnResult({ tickSnapshots, finalState, catches }) {
-      setAnimTick({ snapshots: tickSnapshots, currentIndex: 0, finalState, catches: catches ?? [] });
+    function onTurnResult({ tickSnapshots, finalState, catches, perkNotices: notices }) {
+      setAnimTick({ snapshots: tickSnapshots, currentIndex: 0, finalState, catches: catches ?? [], perkNotices: notices ?? [] });
     }
 
     function onReadyCount({ readyCount, totalCount }) {
@@ -146,13 +150,14 @@ export function OnlineFlow({ onPlayLocal }) {
     if (!animTick) return;
 
     if (animTick.currentIndex >= animTick.snapshots.length) {
-      const { finalState, catches } = animTick;
+      const { finalState, catches, perkNotices: notices } = animTick;
       setMyPlayer(finalState.yourPlayer);
       setVisiblePlayers(finalState.visiblePlayers);
       setTurn(finalState.turn);
       setHeadStartTurnsLeft(finalState.headStartTurnsLeft);
       setGameOver(finalState.gameOver);
       setPlayerCounts(finalState.playerCounts ?? { hunters: 0, runners: 0 });
+      setPerkBoxes(finalState.perkBoxes ?? []);
       setLocalPath([]);
       setPlannedFacing(null);
       setSubmitted(false);
@@ -160,10 +165,18 @@ export function OnlineFlow({ onPlayLocal }) {
 
       if (catches?.length) {
         const ts = Date.now();
-        const notices = catches.map((c, i) => ({ ...c, id: `${ts}-${i}` }));
-        setCatchNotices((prev) => [...prev, ...notices]);
-        notices.forEach((n) => {
+        const catchItems = catches.map((c, i) => ({ ...c, id: `${ts}-c${i}` }));
+        setCatchNotices((prev) => [...prev, ...catchItems]);
+        catchItems.forEach((n) => {
           setTimeout(() => setCatchNotices((prev) => prev.filter((x) => x.id !== n.id)), 4000);
+        });
+      }
+      if (notices?.length) {
+        const ts = Date.now();
+        const perkItems = notices.map((n, i) => ({ ...n, id: `${ts}-p${i}` }));
+        setPerkNotices((prev) => [...prev, ...perkItems]);
+        perkItems.forEach((n) => {
+          setTimeout(() => setPerkNotices((prev) => prev.filter((x) => x.id !== n.id)), 4000);
         });
       }
       return;
@@ -209,9 +222,11 @@ export function OnlineFlow({ onPlayLocal }) {
 
     // It's a move step — check limits.
     const moveCount = localPath.filter((s) => !s.look).length;
-    if (moveCount >= classInfo.maxSteps) return;
+    const hasFreeSprint = myPlayer.activePerks?.freeSprint === true;
+    const effectiveMaxSteps = hasFreeSprint ? 10 : classInfo.maxSteps;
+    if (moveCount >= effectiveMaxSteps) return;
     if (!canMoveTo(lastPos.x, lastPos.y, toX, toY, mapData)) return;
-    if (plannedCost(myPlayer.classKey, moveCount + 1) > myPlayer.stamina) return;
+    if (!hasFreeSprint && plannedCost(myPlayer.classKey, moveCount + 1) > myPlayer.stamina) return;
 
     setLocalPath((prev) => [...prev, { x: toX, y: toY }]);
     setPlannedFacing(newFacing);
@@ -283,14 +298,22 @@ export function OnlineFlow({ onPlayLocal }) {
 
   const myDisplayPlayer = displayPlayers.find((p) => p.id === myPlayer?.id);
 
+  const visionOpts = useMemo(() => {
+    const perks = myPlayer?.activePerks ?? {};
+    return {
+      omniscience: (perks.omniscience ?? 0) > 0,
+      rangeBonus: (perks.extendedVision ?? 0) > 0 ? 5 : 0,
+    };
+  }, [myPlayer?.activePerks]);
+
   const visible = useMemo(() => {
     if (!mapData || !myDisplayPlayer) return new Set();
     if (isAnimating) {
-      return computeVisible(myDisplayPlayer.x, myDisplayPlayer.y, myDisplayPlayer.facing, mapData);
+      return computeVisible(myDisplayPlayer.x, myDisplayPlayer.y, myDisplayPlayer.facing, mapData, visionOpts);
     }
     const playerWithPath = { ...myDisplayPlayer, path: localPath };
-    return computeVisibleAlongPath(playerWithPath, mapData);
-  }, [mapData, myDisplayPlayer, localPath, isAnimating]);
+    return computeVisibleAlongPath(playerWithPath, mapData, visionOpts);
+  }, [mapData, myDisplayPlayer, localPath, isAnimating, visionOpts]);
 
   const me = room?.players.find((p) => p.id === yourId);
   const isHost = me?.isHost ?? false;
@@ -540,12 +563,22 @@ export function OnlineFlow({ onPlayLocal }) {
     const canAct = !(myPlayer.role === "HUNTER" && headStartTurnsLeft > 0);
     const classInfo = CLASSES[myPlayer.classKey] ?? CLASSES.STANDARD;
     const moveCount = localPath.filter((s) => !s.look).length;
-    const stepsLeft = classInfo.maxSteps - moveCount;
-    const staminaAfter = myPlayer.stamina - plannedCost(myPlayer.classKey, moveCount);
+    const hasFreeSprint = myPlayer.activePerks?.freeSprint === true;
+    const effectiveMaxSteps = hasFreeSprint ? 10 : classInfo.maxSteps;
+    const stepsLeft = effectiveMaxSteps - moveCount;
+    const staminaAfter = hasFreeSprint ? myPlayer.stamina : myPlayer.stamina - plannedCost(myPlayer.classKey, moveCount);
+
+    const PERK_LABELS = {
+      OMNISCIENCE: "All-Seeing",
+      STAMINA_REFILL: "Full Stamina",
+      EXTENDED_VISION: "Eagle Eye",
+      FREE_SPRINT: "Sprint",
+    };
+    const activePerks = myPlayer.activePerks ?? {};
 
     return (
       <>
-      {catchNotices.length > 0 && (
+      {(catchNotices.length > 0 || perkNotices.length > 0) && (
         <div style={{
           position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)",
           zIndex: 100, display: "flex", flexDirection: "column", gap: 8,
@@ -560,6 +593,17 @@ export function OnlineFlow({ onPlayLocal }) {
               whiteSpace: "nowrap",
             }}>
               {n.caughtBy} caught {n.name}!
+            </div>
+          ))}
+          {perkNotices.map((n) => (
+            <div key={n.id} style={{
+              background: "#f5c400", color: "#1a1200",
+              padding: "10px 22px", borderRadius: 8, fontWeight: 700,
+              fontSize: 15, fontFamily: "system-ui",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+              whiteSpace: "nowrap",
+            }}>
+              {n.playerName} picked up {PERK_LABELS[n.perk] ?? n.perk}!
             </div>
           ))}
         </div>
@@ -583,6 +627,7 @@ export function OnlineFlow({ onPlayLocal }) {
                 if (tile === "TREE") bg = "#4caf50";
 
                 const occupant = playersAt.get(key);
+                const isPerkBox = perkBoxes.some((b) => b.x === x && b.y === y);
 
                 const plannedIndex =
                   !isAnimating && !submitted
@@ -590,6 +635,7 @@ export function OnlineFlow({ onPlayLocal }) {
                     : -1;
                 const showPlanned = plannedIndex !== -1;
 
+                if (isPerkBox) bg = "#f5c400";
                 if (showPlanned) bg = myPlayer.role === "HUNTER" ? "#9c27b0" : "#00bcd4";
 
                 return (
@@ -659,7 +705,11 @@ export function OnlineFlow({ onPlayLocal }) {
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 12, color: "#555", marginBottom: 8 }}>
                 Steps left: <b>{stepsLeft}</b>
-                {" · "}Stamina: <b>{staminaAfter}/{classInfo.staminaMax}</b>
+                {" · "}
+                {hasFreeSprint
+                  ? <span style={{ color: "#880e4f", fontWeight: 700 }}>Sprint (free)</span>
+                  : <>Stamina: <b>{staminaAfter}/{classInfo.staminaMax}</b></>
+                }
               </div>
               <div style={{
                 display: "grid",
@@ -732,6 +782,25 @@ export function OnlineFlow({ onPlayLocal }) {
             {myPlayer.role === "HUNTER" && headStartTurnsLeft > 0 && (
               <div style={{ color: "#b71c1c", fontSize: 13, marginTop: 4 }}>
                 Waiting for head start to end
+              </div>
+            )}
+            {(activePerks.omniscience > 0 || activePerks.extendedVision > 0 || activePerks.freeSprint) && (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
+                {activePerks.omniscience > 0 && (
+                  <div style={{ fontSize: 12, padding: "2px 7px", background: "#fff9c4", color: "#5d4037", borderRadius: 4, border: "1px solid #f5c400", fontWeight: 600 }}>
+                    ★ All-Seeing ({activePerks.omniscience} turn{activePerks.omniscience !== 1 ? "s" : ""})
+                  </div>
+                )}
+                {activePerks.extendedVision > 0 && (
+                  <div style={{ fontSize: 12, padding: "2px 7px", background: "#e8f5e9", color: "#1b5e20", borderRadius: 4, border: "1px solid #66bb6a", fontWeight: 600 }}>
+                    ★ Eagle Eye ({activePerks.extendedVision} turn{activePerks.extendedVision !== 1 ? "s" : ""})
+                  </div>
+                )}
+                {activePerks.freeSprint && (
+                  <div style={{ fontSize: 12, padding: "2px 7px", background: "#fce4ec", color: "#880e4f", borderRadius: 4, border: "1px solid #f48fb1", fontWeight: 600 }}>
+                    ★ Sprint — 10 free steps this turn
+                  </div>
+                )}
               </div>
             )}
           </div>

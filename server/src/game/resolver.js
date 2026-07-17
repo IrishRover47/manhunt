@@ -39,6 +39,8 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
       }
 
       const classInfo = CLASSES[p.classKey] ?? CLASSES.STANDARD;
+      const hasFreeSteps = p.activePerks?.freeSprint === true;
+      const effectiveMaxSteps = hasFreeSteps ? 10 : classInfo.maxSteps;
 
       // Look steps are instantaneous: apply facing change now, advance index, no tick cost.
       while (p.stepIndex < p.path.length && p.path[p.stepIndex]?.look) {
@@ -51,7 +53,7 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
         continue;
       }
       // Gate on actual moves taken, not stepIndex (look steps don't count).
-      if (p.movedSquaresThisTurn >= classInfo.maxSteps) {
+      if (p.movedSquaresThisTurn >= effectiveMaxSteps) {
         proposed.set(p.id, null);
         p.stopped = true;
         continue;
@@ -59,7 +61,7 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
 
       const nextExecutedStepNumber = p.movedSquaresThisTurn + 1;
       const cost = stepExecutionCost(p.classKey, nextExecutedStepNumber);
-      if (p.stamina < cost) {
+      if (!hasFreeSteps && p.stamina < cost) {
         proposed.set(p.id, null);
         p.stopped = true;
         continue;
@@ -169,14 +171,17 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
 
       const executedStepNumber = p.movedSquaresThisTurn + 1;
       const cost = stepExecutionCost(p.classKey, executedStepNumber);
+      const freeStep = p.activePerks?.freeSprint === true;
 
       const moveDx = mv.x - p.x;
       const moveDy = mv.y - p.y;
       p.x = mv.x;
       p.y = mv.y;
       p.facing = Math.atan2(moveDy, moveDx) * 180 / Math.PI;
-      p.stamina = Math.max(0, p.stamina - cost);
-      p.staminaSpentThisTurn += cost;
+      if (!freeStep) {
+        p.stamina = Math.max(0, p.stamina - cost);
+        p.staminaSpentThisTurn += cost;
+      }
       p.movedSquaresThisTurn += 1;
       p.stepIndex += 1;
     }
@@ -273,6 +278,7 @@ export function resolveTurn(players, map, headStartTurnsLeft) {
       stamina: Math.min(classInfo.staminaMax, p.stamina + rec),
       path: [],
       ready: false,
+      activePerks: p.activePerks ?? { omniscience: 0, extendedVision: 0, freeSprint: false },
     };
   });
 

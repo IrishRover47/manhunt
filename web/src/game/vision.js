@@ -1,7 +1,16 @@
 import { MAX_VISION_DISTANCE } from "./constants.js";
 import { inBounds, blocksVision } from "./map.js";
 
-export function computeVisible(px, py, facingAngle, map) {
+export function computeVisible(px, py, facingAngle, map, { rangeBonus = 0, omniscience = false } = {}) {
+  if (omniscience) {
+    const all = new Set();
+    for (let y = 0; y < map.height; y++)
+      for (let x = 0; x < map.width; x++)
+        all.add(`${x},${y}`);
+    return all;
+  }
+
+  const maxDist = MAX_VISION_DISTANCE + rangeBonus;
   const visible = new Set();
   const rad = (facingAngle * Math.PI) / 180;
   const fx = Math.cos(rad);
@@ -14,7 +23,7 @@ export function computeVisible(px, py, facingAngle, map) {
       const vy = y - py;
       const dist = Math.hypot(vx, vy);
 
-      if (dist > MAX_VISION_DISTANCE) continue;
+      if (dist > maxDist) continue;
 
       if (dist === 0) {
         visible.add(`${x},${y}`);
@@ -46,10 +55,10 @@ export function computeVisible(px, py, facingAngle, map) {
   return visible;
 }
 
-export function computeVisibleAlongPath(player, map) {
+export function computeVisibleAlongPath(player, map, visionOpts = {}) {
   const union = new Set();
 
-  computeVisible(player.x, player.y, player.facing, map).forEach((k) => union.add(k));
+  computeVisible(player.x, player.y, player.facing, map, visionOpts).forEach((k) => union.add(k));
 
   let prev = { x: player.x, y: player.y };
   let facing = player.facing;
@@ -57,7 +66,7 @@ export function computeVisibleAlongPath(player, map) {
   for (const step of player.path) {
     if (step.look) {
       facing = step.facing;
-      computeVisible(prev.x, prev.y, facing, map).forEach((k) => union.add(k));
+      computeVisible(prev.x, prev.y, facing, map, visionOpts).forEach((k) => union.add(k));
       continue;
     }
 
@@ -73,7 +82,7 @@ export function computeVisibleAlongPath(player, map) {
     else if (dx === 1 && dy === -1) facing = -45;
     else if (dx === -1 && dy === -1) facing = -135;
 
-    computeVisible(step.x, step.y, facing, map).forEach((k) => union.add(k));
+    computeVisible(step.x, step.y, facing, map, visionOpts).forEach((k) => union.add(k));
     prev = step;
   }
 

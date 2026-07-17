@@ -46,12 +46,12 @@ function fleeStep(x, y, threats, map) {
   return best;
 }
 
-// Random valid step.
-function wander(x, y, map) {
+// Random valid step, optionally avoiding a set of blocked tile keys "x,y".
+function wander(x, y, map, blocked = new Set()) {
   const opts = [];
   for (const [dx, dy] of DIRS) {
     const nx = x + dx, ny = y + dy;
-    if (canMoveTo(x, y, nx, ny, map)) opts.push({ x: nx, y: ny });
+    if (canMoveTo(x, y, nx, ny, map) && !blocked.has(`${nx},${ny}`)) opts.push({ x: nx, y: ny });
   }
   return opts.length ? opts[Math.floor(Math.random() * opts.length)] : null;
 }
@@ -124,6 +124,13 @@ export function chooseBotPath(room, playerId) {
 
   for (const e of visibleEnemies) mem[e.id] = { x: e.x, y: e.y };
 
+  // Positions of allied players (same role) — used to avoid mutual blocking.
+  const allyPositions = new Set(
+    gs.players
+      .filter((p) => p.id !== playerId && p.role === gsPlayer.role)
+      .map((p) => `${p.x},${p.y}`)
+  );
+
   // For runners: compute a safe destination once for the whole turn.
   // For hunters: destination changes per-step (chasing / patrolling).
   let runnerDest = null;
@@ -167,7 +174,12 @@ export function chooseBotPath(room, playerId) {
         next = stepToward(cx, cy, target.x, target.y, map);
       } else {
         // Move toward last-known enemy position; clear once arrived.
-        const knownId = Object.keys(mem).find((k) => k !== "_patrol");
+        // Skip IDs that have since converted to the same role (e.g. a caught runner).
+        const knownId = Object.keys(mem).find((k) => {
+          if (k === "_patrol") return false;
+          const p = gs.players.find((q) => q.id === k);
+          return !p || p.role !== gsPlayer.role;
+        });
         if (knownId) {
           const pos = mem[knownId];
           if (cx === pos.x && cy === pos.y) {
@@ -182,7 +194,7 @@ export function chooseBotPath(room, playerId) {
             mem._patrol = pickPatrolTarget(cx, cy, map);
           }
           next = stepToward(cx, cy, mem._patrol.x, mem._patrol.y, map)
-            ?? wander(cx, cy, map);
+            ?? wander(cx, cy, map, allyPositions);
         }
       }
     } else {
@@ -198,8 +210,13 @@ export function chooseBotPath(room, playerId) {
           next = towardDest ?? fleeStep(cx, cy, activeThreat, map);
         }
       } else {
-        next = wander(cx, cy, map);
+        next = wander(cx, cy, map, allyPositions);
       }
+    }
+
+    // If the best next step lands on an ally's current tile, find an alternative.
+    if (next && allyPositions.has(`${next.x},${next.y}`)) {
+      next = wander(cx, cy, map, allyPositions);
     }
 
     if (!next) break;

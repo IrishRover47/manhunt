@@ -7,6 +7,13 @@ import { findSpawn } from "./game/spawn.js";
 import { computeVisible } from "./game/vision.js";
 import { resolveTurn } from "./game/resolver.js";
 
+const PERK_TYPES = ["OMNISCIENCE", "STAMINA_REFILL", "EXTENDED_VISION", "FREE_SPRINT"];
+const PERK_COOLDOWN = 5;
+
+function emptyPerks() {
+  return { omniscience: 0, extendedVision: 0, freeSprint: false };
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Map loading ───────────────────────────────────────────────────────────────
@@ -222,6 +229,7 @@ export function initGame(room) {
       stamina: hunterClass.staminaMax,
       path: [],
       ready: false,
+      activePerks: emptyPerks(),
     },
   ];
 
@@ -245,6 +253,7 @@ export function initGame(room) {
       stamina: info.staminaMax,
       path: [],
       ready: false,
+      activePerks: emptyPerks(),
     });
     // Seed bot memory with the hunter's starting position so the bot keeps
     // fleeing even after it moves away and can no longer see the hunter.
@@ -254,12 +263,22 @@ export function initGame(room) {
     }
   }
 
+  // Assign perk types randomly — one of each, shuffled across box positions.
+  const shuffledTypes = [...PERK_TYPES].sort(() => Math.random() - 0.5);
+  const perkBoxes = (mapData.perkBoxes ?? []).map((pos, i) => ({
+    x: pos.x,
+    y: pos.y,
+    type: shuffledTypes[i] ?? "STAMINA_REFILL",
+    cooldownTurnsLeft: 0,
+  }));
+
   room.gameState = {
     players: gamePlayers,
     map: mapData,
     turn: 1,
     headStartTurnsLeft: room.headStart,
     gameOver: null,
+    perkBoxes,
   };
   room.pendingPaths = new Map();
   room.status = "playing";
@@ -276,7 +295,12 @@ export function filteredState(room, playerId) {
   const player = gs.players.find((p) => p.id === playerId);
   if (!player) return null;
 
-  const visible = computeVisible(player.x, player.y, player.facing, gs.map);
+  const perks = player.activePerks ?? emptyPerks();
+  const isOmniscient = perks.omniscience > 0;
+  const visionBonus = perks.extendedVision > 0 ? 5 : 0;
+  const visionOpts = { omniscience: isOmniscient, rangeBonus: visionBonus };
+
+  const visible = computeVisible(player.x, player.y, player.facing, gs.map, visionOpts);
 
   return {
     yourPlayer: {
@@ -289,6 +313,7 @@ export function filteredState(room, playerId) {
       y: player.y,
       facing: player.facing,
       stamina: player.stamina,
+      activePerks: perks,
     },
     visiblePlayers: gs.players
       .filter((p) => p.id !== playerId && visible.has(`${p.x},${p.y}`))
@@ -302,6 +327,7 @@ export function filteredState(room, playerId) {
         facing: p.facing,
       })),
     turn: gs.turn,
+    turnLimit: room.turnLimit,
     headStartTurnsLeft: gs.headStartTurnsLeft,
     gameOver: gs.gameOver,
     mapKey: room.mapKey,
@@ -309,6 +335,8 @@ export function filteredState(room, playerId) {
       hunters: gs.players.filter((p) => p.role === "HUNTER").length,
       runners: gs.players.filter((p) => p.role === "RUNNER").length,
     },
+    // Box positions only — type and cooldown are hidden from clients.
+    perkBoxes: (gs.perkBoxes ?? []).map((b) => ({ x: b.x, y: b.y })),
   };
 }
 
@@ -323,6 +351,18 @@ export function filteredTickSnaps(tickSnapshots, playerId, map) {
       (p) => p.id === playerId || visible.has(`${p.x},${p.y}`)
     );
   });
+}
+
+// ── Perk application ─────────────────────────────────────────────────────────
+
+function applyPerk(player, type, classInfo) {
+  if (!player.activePerks) player.activePerks = emptyPerks();
+  switch (type) {
+    case "OMNISCIENCE":     player.activePerks.omniscience = 1; break;
+    case "EXTENDED_VISION": player.activePerks.extendedVision = 3; break;
+    case "FREE_SPRINT":     player.activePerks.freeSprint = true; break;
+    case "STAMINA_REFILL":  player.stamina = classInfo.staminaMax; break;
+  }
 }
 
 // ── Turn resolution ───────────────────────────────────────────────────────────
@@ -356,16 +396,49 @@ export function resolveTurnInRoom(room) {
     ? { winner: "RUNNER", turn: room.turnLimit }
     : null;
 
+  // Tick down active perk counters and consume freeSprint (used in this turn's resolution).
+  for (const p of resolved) {
+    if (!p.activePerks) { p.activePerks = emptyPerks(); continue; }
+    if (p.activePerks.omniscience > 0) p.activePerks.omniscience--;
+    if (p.activePerks.extendedVision > 0) p.activePerks.extendedVision--;
+    p.activePerks.freeSprint = false; // freeSprint lasts exactly one turn
+  }
+
+  // Tick down box cooldowns.
+  for (const box of gs.perkBoxes ?? []) {
+    if (box.cooldownTurnsLeft > 0) box.cooldownTurnsLeft--;
+  }
+
+  // Check if any player finished their turn on an active perk box.
+  const perkNotices = [];
+  for (const box of gs.perkBoxes ?? []) {
+    if (box.cooldownTurnsLeft > 0) continue;
+    for (const p of resolved) {
+      if (p.x !== box.x || p.y !== box.y) continue;
+      applyPerk(p, box.type, CLASSES[p.classKey] ?? CLASSES.STANDARD);
+      box.cooldownTurnsLeft = PERK_COOLDOWN;
+      perkNotices.push({ playerId: p.id, playerName: p.name, perk: box.type });
+      break; // one player per box per turn
+    }
+  }
+
   room.gameState = {
     players: resolved,
     map: gs.map,
     turn: newTurn,
     headStartTurnsLeft: newHeadStart,
     gameOver,
+    perkBoxes: gs.perkBoxes ?? [],
   };
   room.pendingPaths = new Map();
 
-  return { tickSnapshots, gameOver, catches };
+  // Wipe converted runner bots' memory so they start fresh as hunters.
+  for (const c of catches) {
+    const rp = room.players.find((p) => p.id === c.id && p.isBot);
+    if (rp) rp.botMemory = {};
+  }
+
+  return { tickSnapshots, gameOver, catches, perkNotices };
 }
 
 // ── Bot management ────────────────────────────────────────────────────────────

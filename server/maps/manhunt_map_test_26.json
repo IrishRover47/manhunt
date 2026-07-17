@@ -7,6 +7,12 @@
     "hunter": { "x": 6, "y": 16 },
     "runners_spawn_radius": 3
   },
+  "perkBoxes": [
+    { "x": 13, "y": 0 },
+    { "x": 13, "y": 9 },
+    { "x": 25, "y": 19 },
+    { "x": 0,  "y": 23 }
+  ],
   "tiles": [
     ["BLOCK","BLOCK","BLOCK","BLOCK","BLOCK","EMPTY","EMPTY","EMPTY","TREE","TREE","TREE","TREE","TREE","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","BLOCK","BLOCK","BLOCK","BLOCK","BLOCK","BLOCK","BLOCK","BLOCK"],
     ["BLOCK","BLOCK","BLOCK","BLOCK","BLOCK","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","EMPTY","BLOCK","BLOCK","BLOCK"],

@@ -101,13 +101,13 @@ function submitBotPaths(room) {
 // ── Turn resolution + broadcast ───────────────────────────────────────────────
 
 function broadcastTurnResult(room) {
-  const { tickSnapshots, gameOver, catches } = resolveTurnInRoom(room);
+  const { tickSnapshots, gameOver, catches, perkNotices } = resolveTurnInRoom(room);
 
   for (const p of room.players) {
     if (!p.socketId) continue;
     const snaps = filteredTickSnaps(tickSnapshots, p.id, room.gameState.map);
     const final = filteredState(room, p.id);
-    io.to(p.socketId).emit("turn_result", { tickSnapshots: snaps, finalState: final, catches });
+    io.to(p.socketId).emit("turn_result", { tickSnapshots: snaps, finalState: final, catches, perkNotices });
   }
 
   console.log(
