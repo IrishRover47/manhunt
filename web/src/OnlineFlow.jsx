@@ -58,6 +58,7 @@ export function OnlineFlow({ onPlayLocal }) {
   const [catchNotices, setCatchNotices] = useState([]);
   const [perkNotices, setPerkNotices] = useState([]);
   const [perkBoxes, setPerkBoxes] = useState([]);
+  const [lastTurnAt, setLastTurnAt] = useState(null);
 
   // ── Turn planning state ───────────────────────────────────────────────────
   const [localPath, setLocalPath] = useState([]);
@@ -109,6 +110,7 @@ export function OnlineFlow({ onPlayLocal }) {
       setPlayerCounts(state.playerCounts ?? { hunters: 0, runners: 0 });
       setTurnLimit(state.turnLimit ?? 20);
       setPerkBoxes(state.perkBoxes ?? []);
+      setLastTurnAt(state.lastTurnAt ?? null);
       setLocalPath([]);
       setPlannedFacing(null);
       setSubmitted(false);
@@ -158,6 +160,7 @@ export function OnlineFlow({ onPlayLocal }) {
       setGameOver(finalState.gameOver);
       setPlayerCounts(finalState.playerCounts ?? { hunters: 0, runners: 0 });
       setPerkBoxes(finalState.perkBoxes ?? []);
+      setLastTurnAt(finalState.lastTurnAt ?? null);
       setLocalPath([]);
       setPlannedFacing(null);
       setSubmitted(false);
@@ -759,6 +762,18 @@ export function OnlineFlow({ onPlayLocal }) {
               Head start: {headStartTurnsLeft} turn{headStartTurnsLeft !== 1 ? "s" : ""} left
             </div>
           )}
+          {!submitted && lastTurnAt && (() => {
+            const deadline = new Date(lastTurnAt).getTime() + 24 * 60 * 60 * 1000;
+            const msLeft = deadline - Date.now();
+            const hLeft = Math.max(0, Math.floor(msLeft / 3600000));
+            const mLeft = Math.max(0, Math.floor((msLeft % 3600000) / 60000));
+            const urgent = msLeft < 3 * 3600000;
+            return (
+              <div style={{ fontSize: 12, marginTop: 4, color: urgent ? "#b71c1c" : "#666" }}>
+                ⏱ Submit within {hLeft}h {mLeft}m or your turn is skipped
+              </div>
+            );
+          })()}
 
           <div style={{ marginTop: 10, display: "flex", gap: 14, fontSize: 13, fontWeight: 600 }}>
             <span style={{ color: "#c62828" }}>

@@ -6,6 +6,7 @@ import { CLASSES } from "./game/constants.js";
 import { findSpawn } from "./game/spawn.js";
 import { computeVisible } from "./game/vision.js";
 import { resolveTurn } from "./game/resolver.js";
+import { saveRoom, deleteRoom, loadRoomByCode, upsertPlayerIdentity } from "./db.js";
 
 const PERK_TYPES = ["OMNISCIENCE", "STAMINA_REFILL", "EXTENDED_VISION", "FREE_SPRINT"];
 const PERK_COOLDOWN = 5;
@@ -33,6 +34,14 @@ function loadMap(mapKey) {
 // ── Room store ────────────────────────────────────────────────────────────────
 
 const rooms = new Map();
+
+export function getAllRooms() { return rooms.values(); }
+
+export function registerRoom(room) { rooms.set(room.code, room); }
+
+function persist(room) {
+  saveRoom(room).catch((err) => console.error("[db] persist failed:", err.message));
+}
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
@@ -90,19 +99,29 @@ export function createRoom(socketId, name, playerToken) {
         isHost: true,
       },
     ],
-    // Game state — populated by initGame()
     gameState: null,
     pendingPaths: new Map(),
+    lastTurnResult: null,
     turnTimerRef: null,
     deleteTimerRef: null,
   };
 
   rooms.set(code, room);
+  upsertPlayerIdentity(playerId, name || "Player").catch(() => {});
+  persist(room);
   return { room, player: room.players[0] };
 }
 
-export function joinRoom(code, socketId, name, playerToken) {
-  const room = rooms.get(code?.toUpperCase());
+export async function joinRoom(code, socketId, name, playerToken) {
+  const upperCode = code?.toUpperCase();
+  let room = rooms.get(upperCode);
+
+  // If not in memory, try loading from DB (player returning after server restart).
+  if (!room) {
+    room = await loadRoomByCode(upperCode);
+    if (room) rooms.set(room.code, room);
+  }
+
   if (!room) return { error: "Room not found" };
   if (room.status === "playing" && !room.players.find((p) => p.id === playerToken)) {
     return { error: "Game already in progress" };
@@ -111,18 +130,18 @@ export function joinRoom(code, socketId, name, playerToken) {
     return { error: "Room is full (max 6)" };
   }
 
-  // Cancel pending room deletion if someone is coming back.
   if (room.deleteTimerRef) {
     clearTimeout(room.deleteTimerRef);
     room.deleteTimerRef = null;
   }
 
-  // Reconnect: same token found in room
+  // Reconnect: same token already in room
   const existing = playerToken
     ? room.players.find((p) => p.id === playerToken)
     : null;
   if (existing) {
     existing.socketId = socketId;
+    persist(room);
     return { room, player: existing, reconnected: true };
   }
 
@@ -137,6 +156,8 @@ export function joinRoom(code, socketId, name, playerToken) {
   };
 
   room.players.push(player);
+  upsertPlayerIdentity(player.id, player.name).catch(() => {});
+  persist(room);
   return { room, player, reconnected: false };
 }
 
@@ -154,10 +175,14 @@ export function removePlayer(socketId) {
   const player = room.players.find((p) => p.socketId === socketId);
   if (player) player.socketId = null;
 
+  // Always persist so reconnecting players find their game.
+  persist(room);
+
   if (room.players.filter((p) => !p.isBot).every((p) => !p.socketId)) {
+    // All humans gone — evict from memory after 2h but keep in DB.
     room.deleteTimerRef = setTimeout(() => {
       rooms.delete(room.code);
-      console.log(`[room] ${room.code} expired after 2h grace period`);
+      console.log(`[room] ${room.code} evicted from memory (still in DB)`);
     }, 2 * 60 * 60 * 1000);
     return room;
   }
@@ -184,6 +209,7 @@ export function updatePlayer(socketId, updates) {
   for (const key of PLAYER_FIELDS) {
     if (updates[key] !== undefined) player[key] = updates[key];
   }
+  persist(room);
   return room;
 }
 
@@ -195,6 +221,7 @@ export function updateRoomSettings(socketId, updates) {
   for (const key of ROOM_FIELDS) {
     if (updates[key] !== undefined) room[key] = updates[key];
   }
+  persist(room);
   return room;
 }
 
@@ -279,10 +306,13 @@ export function initGame(room) {
     headStartTurnsLeft: room.headStart,
     gameOver: null,
     perkBoxes,
+    lastTurnAt: new Date().toISOString(),
   };
   room.pendingPaths = new Map();
+  room.lastTurnResult = null;
   room.status = "playing";
 
+  persist(room);
   return mapData;
 }
 
@@ -337,6 +367,7 @@ export function filteredState(room, playerId) {
     },
     // Box positions only — type and cooldown are hidden from clients.
     perkBoxes: (gs.perkBoxes ?? []).map((b) => ({ x: b.x, y: b.y })),
+    lastTurnAt: gs.lastTurnAt ?? null,
   };
 }
 
@@ -429,8 +460,12 @@ export function resolveTurnInRoom(room) {
     headStartTurnsLeft: newHeadStart,
     gameOver,
     perkBoxes: gs.perkBoxes ?? [],
+    lastTurnAt: new Date().toISOString(),
   };
   room.pendingPaths = new Map();
+  room.lastTurnResult = { tickSnapshots, catches, perkNotices, resolvedTurn: gs.turn };
+
+  if (gameOver) room.status = "done";
 
   // Wipe converted runner bots' memory so they start fresh as hunters.
   for (const c of catches) {
@@ -438,6 +473,7 @@ export function resolveTurnInRoom(room) {
     if (rp) rp.botMemory = {};
   }
 
+  persist(room);
   return { tickSnapshots, gameOver, catches, perkNotices };
 }
 
@@ -467,6 +503,7 @@ export function addBotToRoom(code, hostSocketId, role) {
     botMemory: {},
   };
   room.players.push(player);
+  persist(room);
   return { room };
 }
 
@@ -478,6 +515,7 @@ export function removeBotFromRoom(code, hostSocketId, botId) {
   const idx = room.players.findIndex((p) => p.id === botId && p.isBot);
   if (idx === -1) return null;
   room.players.splice(idx, 1);
+  persist(room);
   return room;
 }
 
@@ -496,11 +534,18 @@ export function reconnectState(room, playerId) {
     .filter((p) => !(p.role === "HUNTER" && gs.headStartTurnsLeft > 0))
     .map((p) => p.id);
 
+  const submitted = room.pendingPaths.has(playerId);
+
+  // Only send catch-up animation if the player hasn't submitted yet this turn
+  // (meaning they were away when the last turn resolved).
+  const lastTurnResult = !submitted ? (room.lastTurnResult ?? null) : null;
+
   return {
     type: "game",
     state,
-    submitted: room.pendingPaths.has(playerId),
+    submitted,
     readyCount: room.pendingPaths.size,
     totalCount: eligibleIds.length,
+    lastTurnResult,
   };
 }

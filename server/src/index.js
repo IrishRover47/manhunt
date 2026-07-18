@@ -16,8 +16,11 @@ import {
   reconnectState,
   addBotToRoom,
   removeBotFromRoom,
+  getAllRooms,
+  registerRoom,
 } from "./rooms.js";
 import { chooseBotPath } from "./bot.js";
+import { initDb, loadAllRooms } from "./db.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -39,7 +42,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 
 // ── Turn timer ────────────────────────────────────────────────────────────────
 
-const TURN_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+const TURN_TIMEOUT_MS = 3 * 60 * 1000; // 3 min real-time timer (while players are online)
 
 function startTurnTimer(room) {
   clearTurnTimer(room);
@@ -47,7 +50,6 @@ function startTurnTimer(room) {
     console.log(`[timer] auto-submitting idle players in ${room.code}`);
     const gs = room.gameState;
     if (!gs) return;
-    // Fill in empty paths for anyone who didn't submit.
     const eligibleIds = gs.players
       .filter((p) => !(p.role === "HUNTER" && gs.headStartTurnsLeft > 0))
       .map((p) => p.id);
@@ -64,6 +66,37 @@ function clearTurnTimer(room) {
     room.turnTimerRef = null;
   }
 }
+
+// ── 24h async idle check ──────────────────────────────────────────────────────
+// Runs every 5 minutes. If a turn has been waiting > 24h, auto-submits empty
+// paths for anyone who hasn't moved and resolves the turn.
+
+const IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const room of getAllRooms()) {
+    if (room.status !== "playing") continue;
+    const gs = room.gameState;
+    if (!gs || gs.gameOver) continue;
+
+    const lastTurnAt = gs.lastTurnAt ? new Date(gs.lastTurnAt).getTime() : null;
+    if (!lastTurnAt || now - lastTurnAt < IDLE_TIMEOUT_MS) continue;
+
+    const eligibleIds = gs.players
+      .filter((p) => !(p.role === "HUNTER" && gs.headStartTurnsLeft > 0))
+      .map((p) => p.id);
+
+    const missing = eligibleIds.filter((id) => !room.pendingPaths.has(id));
+    if (!missing.length) continue; // all already submitted, turn resolution pending
+
+    console.log(`[idle] 24h elapsed in ${room.code} — auto-submitting for ${missing.join(", ")}`);
+    for (const id of missing) room.pendingPaths.set(id, []);
+
+    clearTurnTimer(room);
+    broadcastTurnResult(room);
+  }
+}, 5 * 60 * 1000);
 
 // ── Bot path submission ───────────────────────────────────────────────────────
 
@@ -135,8 +168,8 @@ io.on("connection", (socket) => {
   });
 
   // ── Lobby: join / reconnect ────────────────────────────────────────────────
-  socket.on("join_room", ({ code, name, playerToken } = {}) => {
-    const result = joinRoom(code, socket.id, name, playerToken);
+  socket.on("join_room", async ({ code, name, playerToken } = {}) => {
+    const result = await joinRoom(code, socket.id, name, playerToken);
 
     if (result.error) {
       socket.emit("room_error", { message: result.error });
@@ -147,16 +180,32 @@ io.on("connection", (socket) => {
     socket.join(room.code);
 
     if (reconnected && room.status !== "lobby") {
-      // Send current game state back to the reconnecting client.
       const rs = reconnectState(room, player.id);
       if (rs?.type === "game") {
         socket.emit("game_started", rs.state);
+
+        // Send catch-up animation if the last turn resolved while they were away.
+        if (rs.lastTurnResult) {
+          const snaps = filteredTickSnaps(
+            rs.lastTurnResult.tickSnapshots,
+            player.id,
+            room.gameState.map
+          );
+          socket.emit("turn_result", {
+            tickSnapshots: snaps,
+            finalState: rs.state,
+            catches: rs.lastTurnResult.catches,
+            perkNotices: rs.lastTurnResult.perkNotices,
+          });
+        }
+
         socket.emit("ready_count", {
           readyCount: rs.readyCount,
           totalCount: rs.totalCount,
           submitted: rs.submitted,
         });
-        // Restart turn timer if game is still active and no timer is running.
+
+        // Restart turn timer if no one else is driving it.
         if (!rs.state.gameOver && !room.turnTimerRef) {
           startTurnTimer(room);
           submitBotPaths(room);
@@ -214,14 +263,12 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Send each connected player their personalised starting state.
     for (const p of room.players) {
       if (!p.socketId) continue;
       const state = filteredState(room, p.id);
       io.to(p.socketId).emit("game_started", state);
     }
 
-    // Broadcast updated room status to lobby (handles spectators / late joins).
     io.to(room.code).emit("room_state", { room: publicRoom(room) });
 
     startTurnTimer(room);
@@ -242,7 +289,6 @@ io.on("connection", (socket) => {
 
     room.pendingPaths.set(player.id, Array.isArray(path) ? path : []);
 
-    // Broadcast ready count to all players in the room.
     const eligibleIds = gs.players
       .filter((p) => !(p.role === "HUNTER" && gs.headStartTurnsLeft > 0))
       .map((p) => p.id);
@@ -263,7 +309,7 @@ io.on("connection", (socket) => {
     if (room) {
       if (room.players.filter((p) => !p.isBot).every((p) => !p.socketId)) {
         clearTurnTimer(room);
-        console.log(`[room] ${room.code} empty — pausing, expires in 2h`);
+        console.log(`[room] ${room.code} empty — state saved to DB`);
       } else {
         io.to(room.code).emit("room_state", { room: publicRoom(room) });
       }
@@ -272,5 +318,31 @@ io.on("connection", (socket) => {
   });
 });
 
+// ── Startup ───────────────────────────────────────────────────────────────────
+
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => console.log(`Manhunt server on :${PORT}`));
+
+async function start() {
+  await initDb();
+
+  // Reload any rooms that were active before the last server restart.
+  const savedRooms = await loadAllRooms();
+  for (const room of savedRooms) {
+    registerRoom(room);
+    // Bots need to resubmit their paths — they can't have been holding paths
+    // across a restart, so clear any stale pending paths from bots.
+    if (room.status === "playing" && room.gameState && !room.gameState.gameOver) {
+      for (const p of room.players) {
+        if (p.isBot) room.pendingPaths.delete(p.id);
+      }
+    }
+  }
+  console.log(`[startup] restored ${savedRooms.length} room(s) from DB`);
+
+  httpServer.listen(PORT, () => console.log(`Manhunt server on :${PORT}`));
+}
+
+start().catch((err) => {
+  console.error("[startup] fatal:", err);
+  process.exit(1);
+});
