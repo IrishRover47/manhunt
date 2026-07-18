@@ -39,8 +39,8 @@ export function OnlineFlow({ onPlayLocal }) {
   const [screen, setScreen] = useState("menu"); // menu | join | lobby | game
 
   // ── Lobby state ───────────────────────────────────────────────────────────
-  const [name, setName] = useState("");
-  const [joinCode, setJoinCode] = useState("");
+  const [name, setName] = useState(() => localStorage.getItem("manhunt_name") ?? "");
+  const [joinCode, setJoinCode] = useState(() => localStorage.getItem("manhunt_last_room") ?? "");
   const [room, setRoom] = useState(null);
   const [yourId, setYourId] = useState(null);
   const [error, setError] = useState("");
@@ -91,6 +91,7 @@ export function OnlineFlow({ onPlayLocal }) {
     function onRoomJoined({ room, yourId }) {
       setRoom(room);
       setYourId(yourId);
+      localStorage.setItem("manhunt_last_room", room.code);
       setScreen("lobby");
       setError("");
     }
@@ -251,6 +252,7 @@ export function OnlineFlow({ onPlayLocal }) {
   // ── Lobby actions ─────────────────────────────────────────────────────────
   function handleCreate() {
     if (!name.trim()) { setError("Enter your name first"); return; }
+    localStorage.setItem("manhunt_name", name.trim());
     setError("");
     getSocket().emit("create_room", { name: name.trim(), playerToken: getPlayerToken() });
   }
@@ -258,10 +260,26 @@ export function OnlineFlow({ onPlayLocal }) {
   function handleJoin() {
     if (!name.trim()) { setError("Enter your name first"); return; }
     if (!joinCode.trim()) { setError("Enter a room code"); return; }
+    localStorage.setItem("manhunt_name", name.trim());
+    localStorage.setItem("manhunt_last_room", joinCode.trim().toUpperCase());
     setError("");
     getSocket().emit("join_room", {
       code: joinCode.trim().toUpperCase(),
       name: name.trim(),
+      playerToken: getPlayerToken(),
+    });
+  }
+
+  function handleRejoin() {
+    const savedName = localStorage.getItem("manhunt_name") ?? "";
+    const savedCode = localStorage.getItem("manhunt_last_room") ?? "";
+    if (!savedName || !savedCode) return;
+    setName(savedName);
+    setJoinCode(savedCode);
+    setError("");
+    getSocket().emit("join_room", {
+      code: savedCode,
+      name: savedName,
       playerToken: getPlayerToken(),
     });
   }
@@ -326,6 +344,8 @@ export function OnlineFlow({ onPlayLocal }) {
   // ── Screens ───────────────────────────────────────────────────────────────
 
   if (screen === "menu") {
+    const savedName = localStorage.getItem("manhunt_name");
+    const savedCode = localStorage.getItem("manhunt_last_room");
     return (
       <div style={{
         minHeight: "100vh", display: "flex", flexDirection: "column",
@@ -336,7 +356,18 @@ export function OnlineFlow({ onPlayLocal }) {
           tactical pursuit
         </div>
         <div style={{ fontSize: 64, fontWeight: 900, letterSpacing: -2 }}>MANHUNT</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 16, width: 220 }}>
+
+        {savedName && savedCode && (
+          <button onClick={handleRejoin} style={{
+            ...btn("#1b5e20", "#fff"),
+            width: 260, fontSize: 14, lineHeight: 1.4, padding: "12px 20px",
+          }}>
+            ↩ Rejoin as <b>{savedName}</b><br />
+            <span style={{ fontWeight: 400, fontSize: 12, opacity: 0.85 }}>Room {savedCode}</span>
+          </button>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, width: 220 }}>
           <button onClick={onPlayLocal} style={btn("#222", "#fff", { border: "1px solid #444" })}>
             Play Locally
           </button>
