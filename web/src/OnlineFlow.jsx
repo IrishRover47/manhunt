@@ -142,6 +142,7 @@ export function OnlineFlow({ onPlayLocal }) {
 
   // ── Animation state ───────────────────────────────────────────────────────
   const [animTick, setAnimTick] = useState(null);
+  const [pendingTurnResult, setPendingTurnResult] = useState(null);
 
   // ── Re-join on Socket.IO reconnect ───────────────────────────────────────
   // Socket.IO auto-reconnects with a new socket ID — re-announce ourselves
@@ -190,13 +191,14 @@ export function OnlineFlow({ onPlayLocal }) {
       setSubmitted(false);
       setReadyCount(0);
       setAnimTick(null);
+      setPendingTurnResult(null);
       setCatchNotices([]);
       setPerkNotices([]);
       setScreen("game");
     }
 
     function onTurnResult({ tickSnapshots, finalState, catches, perkNotices: notices }) {
-      setAnimTick({ snapshots: tickSnapshots, currentIndex: 0, finalState, catches: catches ?? [], perkNotices: notices ?? [] });
+      setPendingTurnResult({ snapshots: tickSnapshots, finalState, catches: catches ?? [], perkNotices: notices ?? [] });
     }
 
     function onReadyCount({ readyCount, totalCount }) {
@@ -392,7 +394,13 @@ export function OnlineFlow({ onPlayLocal }) {
   function handleLeave() {
     disconnectSocket();
     setRoom(null); setYourId(null); setMapData(null); setMyPlayer(null);
-    setGameOver(null); setAnimTick(null); setScreen("menu"); setError("");
+    setGameOver(null); setAnimTick(null); setPendingTurnResult(null); setScreen("menu"); setError("");
+  }
+
+  function handleWatchMovement() {
+    if (!pendingTurnResult) return;
+    setAnimTick({ ...pendingTurnResult, currentIndex: 0 });
+    setPendingTurnResult(null);
   }
 
   function copyCode() {
@@ -887,35 +895,46 @@ export function OnlineFlow({ onPlayLocal }) {
           </div>
 
           {/* Controls */}
-          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={() => { setLocalPath([]); setPlannedFacing(null); }} disabled={submitted || isAnimating || localPath.length === 0}
-              style={{ padding: "8px 14px", borderRadius: 6, cursor: "pointer" }}>
-              Clear Path
-            </button>
-            <button onClick={handleReady} disabled={submitted || isAnimating}
-              style={{
-                padding: "8px 20px", borderRadius: 6, fontWeight: 700,
-                cursor: submitted || isAnimating ? "default" : "pointer",
-                background: submitted ? "#c8e6c9" : "#1565c0",
-                color: submitted ? "#2e7d32" : "white", border: "none",
-                opacity: isAnimating ? 0.5 : 1,
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {pendingTurnResult ? (
+              <button onClick={handleWatchMovement} style={{
+                padding: "10px 24px", borderRadius: 6, fontWeight: 700, fontSize: 15,
+                background: "#e65100", color: "white", border: "none", cursor: "pointer",
               }}>
-              {submitted ? "✓ Waiting…" : canAct ? "Ready →" : "Pass turn →"}
-            </button>
-            {isAnimating && (
-              <span style={{ fontSize: 13, color: "#888", alignSelf: "center" }}>
-                Resolving… {animTick.currentIndex}/{animTick.snapshots.length}
-              </span>
-            )}
-            {!isAnimating && submitted && (
-              <span style={{ fontSize: 13, color: "#888", alignSelf: "center" }}>
-                Waiting {readyCount}/{totalCount} ready
-              </span>
+                ▶ Watch Movement
+              </button>
+            ) : (
+              <>
+                <button onClick={() => { setLocalPath([]); setPlannedFacing(null); }} disabled={submitted || isAnimating || localPath.length === 0}
+                  style={{ padding: "8px 14px", borderRadius: 6, cursor: "pointer" }}>
+                  Clear Path
+                </button>
+                <button onClick={handleReady} disabled={submitted || isAnimating}
+                  style={{
+                    padding: "8px 20px", borderRadius: 6, fontWeight: 700,
+                    cursor: submitted || isAnimating ? "default" : "pointer",
+                    background: submitted ? "#c8e6c9" : "#1565c0",
+                    color: submitted ? "#2e7d32" : "white", border: "none",
+                    opacity: isAnimating ? 0.5 : 1,
+                  }}>
+                  {submitted ? "✓ Waiting…" : canAct ? "Ready →" : "Pass turn →"}
+                </button>
+                {isAnimating && (
+                  <span style={{ fontSize: 13, color: "#888" }}>
+                    Resolving… {animTick.currentIndex}/{animTick.snapshots.length}
+                  </span>
+                )}
+                {!isAnimating && submitted && (
+                  <span style={{ fontSize: 13, color: "#888" }}>
+                    Waiting {readyCount}/{totalCount} ready
+                  </span>
+                )}
+              </>
             )}
           </div>
 
           {/* D-pad — shown when player can act and hasn't submitted */}
-          {canAct && !submitted && !isAnimating && (
+          {canAct && !submitted && !isAnimating && !pendingTurnResult && (
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 12, color: "#555", marginBottom: 8 }}>
                 Steps left: <b>{stepsLeft}</b>
