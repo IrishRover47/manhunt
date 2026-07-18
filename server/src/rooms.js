@@ -43,6 +43,21 @@ function persist(room) {
   saveRoom(room).catch((err) => console.error("[db] persist failed:", err.message));
 }
 
+export async function abandonRoom(code, playerToken) {
+  let room = rooms.get(code);
+  if (!room) {
+    // Try to load from DB so offline rooms can still be abandoned.
+    room = await loadRoomByCode(code);
+    if (!room) return { error: "Room not found" };
+  }
+  const inRoom = room.players.some((p) => p.id === playerToken);
+  if (!inRoom) return { error: "Not in this room" };
+  room.status = "done";
+  rooms.delete(code);
+  persist(room);
+  return { ok: true };
+}
+
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 function generateCode() {

@@ -34,7 +34,7 @@ const inputStyle = {
 
 // ── Game card (used in browse screen) ────────────────────────────────────────
 
-function GameCard({ game, onJoin, isMine }) {
+function GameCard({ game, onJoin, onAbandon, isMine }) {
   const statusText =
     game.status === "lobby"
       ? `Lobby · ${game.players.length} player${game.players.length !== 1 ? "s" : ""}`
@@ -65,12 +65,25 @@ function GameCard({ game, onJoin, isMine }) {
             {game.myRole}{game.hasSubmitted ? " ✓" : ""}
           </span>
         )}
-        <button
-          onClick={(e) => { e.stopPropagation(); onJoin(); }}
-          style={btn(isMine ? "#1b5e20" : "#1565c0", "#fff", { padding: "5px 14px", fontSize: 13, marginLeft: "auto" })}
-        >
-          {isMine ? "Rejoin" : "Join"}
-        </button>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={onJoin}
+            style={btn(isMine ? "#1b5e20" : "#1565c0", "#fff", { padding: "5px 14px", fontSize: 13 })}
+          >
+            {isMine ? "Rejoin" : "Join"}
+          </button>
+          {isMine && onAbandon && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (window.confirm(`Abandon room ${game.code}? This cannot be undone.`)) onAbandon();
+              }}
+              style={btn("transparent", "#c62828", { padding: "5px 10px", fontSize: 13, border: "1px solid #ef9a9a" })}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
       <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 5 }}>
         {game.players.map((p, i) => (
@@ -502,7 +515,11 @@ export function OnlineFlow({ onPlayLocal }) {
             <h3 style={{ margin: "0 0 10px", fontSize: 15, color: "#333" }}>Your Games</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {myGames.map((g) => (
-                <GameCard key={g.code} game={g} isMine onJoin={() => handleJoinFromBrowse(g.code)} />
+                <GameCard
+                  key={g.code} game={g} isMine
+                  onJoin={() => handleJoinFromBrowse(g.code)}
+                  onAbandon={() => getSocket().emit("abandon_room", { code: g.code, playerToken: getPlayerToken() })}
+                />
               ))}
             </div>
           </div>

@@ -19,6 +19,7 @@ import {
   getAllRooms,
   registerRoom,
   listGamesForSocket,
+  abandonRoom,
 } from "./rooms.js";
 import { chooseBotPath } from "./bot.js";
 import { initDb, loadAllRooms } from "./db.js";
@@ -302,6 +303,18 @@ io.on("connection", (socket) => {
       clearTurnTimer(room);
       broadcastTurnResult(room);
     }
+  });
+
+  // ── Abandon room ───────────────────────────────────────────────────────────
+  socket.on("abandon_room", async ({ code, playerToken } = {}) => {
+    const result = await abandonRoom(code, playerToken);
+    if (result.error) {
+      socket.emit("room_error", { message: result.error });
+      return;
+    }
+    // Refresh the caller's games list so the card disappears immediately.
+    const updated = await listGamesForSocket(playerToken);
+    socket.emit("games_list", updated);
   });
 
   // ── Game browser ──────────────────────────────────────────────────────────
