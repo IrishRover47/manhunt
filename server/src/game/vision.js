@@ -30,6 +30,12 @@ export function computeVisible(px, py, facingAngle, map, { rangeBonus = 0, omnis
         continue;
       }
 
+      // Always see all 8 immediately adjacent tiles regardless of facing.
+      if (dist <= Math.SQRT2 + 0.01) {
+        visible.add(`${x},${y}`);
+        continue;
+      }
+
       const dot = (vx * fx + vy * fy) / dist;
       if (dot < cosHalfFov) continue;
 
