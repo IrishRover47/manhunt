@@ -187,7 +187,10 @@ export function removePlayer(socketId) {
     return room;
   }
 
-  if (!room.players.some((p) => p.isHost && p.socketId)) {
+  // Only transfer host during active games (lobby host stays host until they
+  // explicitly leave, so they can create a room, close the browser, and still
+  // start the game when they return).
+  if (room.status !== "lobby" && !room.players.some((p) => p.isHost && p.socketId)) {
     const next = room.players.find((p) => p.socketId);
     if (next) {
       room.players.forEach((p) => (p.isHost = false));
