@@ -32,11 +32,71 @@ const inputStyle = {
   fontFamily: "system-ui",
 };
 
+// ── Game card (used in browse screen) ────────────────────────────────────────
+
+function GameCard({ game, onJoin, isMine }) {
+  const statusText =
+    game.status === "lobby"
+      ? `Lobby · ${game.players.length} player${game.players.length !== 1 ? "s" : ""}`
+      : `Turn ${game.turn}/${game.turnLimit}`;
+
+  const myRoleColor =
+    game.myRole === "HUNTER" ? "#c62828" : game.myRole === "RUNNER" ? "#1565c0" : "#888";
+
+  return (
+    <div onClick={onJoin} style={{
+      padding: "12px 14px", border: "1px solid #ddd", borderRadius: 8,
+      background: "white", cursor: "pointer",
+      transition: "box-shadow 0.15s",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: "monospace", fontWeight: 800, fontSize: 18, letterSpacing: 3 }}>
+          {game.code}
+        </span>
+        <span style={{
+          fontSize: 11, padding: "2px 8px", borderRadius: 10, fontWeight: 600,
+          background: game.status === "lobby" ? "#e3f2fd" : "#f3e5f5",
+          color: game.status === "lobby" ? "#1565c0" : "#6a1b9a",
+        }}>
+          {statusText}
+        </span>
+        {game.myRole && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: myRoleColor }}>
+            {game.myRole}{game.hasSubmitted ? " ✓" : ""}
+          </span>
+        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onJoin(); }}
+          style={btn(isMine ? "#1b5e20" : "#1565c0", "#fff", { padding: "5px 14px", fontSize: 13, marginLeft: "auto" })}
+        >
+          {isMine ? "Rejoin" : "Join"}
+        </button>
+      </div>
+      <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 5 }}>
+        {game.players.map((p, i) => (
+          <span key={i} style={{
+            fontSize: 11, padding: "1px 7px", borderRadius: 8, fontWeight: 600,
+            background: p.role === "HUNTER" ? "#ffebee" : p.role === "RUNNER" ? "#e3f2fd" : "#f5f5f5",
+            color: p.role === "HUNTER" ? "#c62828" : p.role === "RUNNER" ? "#1565c0" : "#888",
+          }}>
+            {p.isBot ? "🤖 " : ""}{p.name}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function OnlineFlow({ onPlayLocal }) {
   // ── Navigation state ──────────────────────────────────────────────────────
-  const [screen, setScreen] = useState("menu"); // menu | join | lobby | game
+  const [screen, setScreen] = useState("menu"); // menu | browse | join | lobby | game
+
+  // ── Browse / lobby list state ─────────────────────────────────────────────
+  const [myGames, setMyGames] = useState([]);
+  const [openLobbies, setOpenLobbies] = useState([]);
+  const [loadingGames, setLoadingGames] = useState(false);
 
   // ── Lobby state ───────────────────────────────────────────────────────────
   const [name, setName] = useState(() => localStorage.getItem("manhunt_name") ?? "");
@@ -131,12 +191,19 @@ export function OnlineFlow({ onPlayLocal }) {
       setTotalCount(totalCount);
     }
 
+    function onGamesList({ myGames: mg, openLobbies: ol }) {
+      setMyGames(mg ?? []);
+      setOpenLobbies(ol ?? []);
+      setLoadingGames(false);
+    }
+
     socket.on("room_joined", onRoomJoined);
     socket.on("room_state", onRoomState);
     socket.on("room_error", onRoomError);
     socket.on("game_started", onGameStarted);
     socket.on("turn_result", onTurnResult);
     socket.on("ready_count", onReadyCount);
+    socket.on("games_list", onGamesList);
 
     return () => {
       socket.off("room_joined", onRoomJoined);
@@ -145,6 +212,7 @@ export function OnlineFlow({ onPlayLocal }) {
       socket.off("game_started", onGameStarted);
       socket.off("turn_result", onTurnResult);
       socket.off("ready_count", onReadyCount);
+      socket.off("games_list", onGamesList);
     };
   }, [screen]);
 
@@ -249,7 +317,31 @@ export function OnlineFlow({ onPlayLocal }) {
     return () => window.removeEventListener("keydown", handler);
   }, [screen, myPlayer, localPath, plannedFacing, submitted, animTick, headStartTurnsLeft]);
 
+  // ── Fetch games list when entering browse screen ──────────────────────────
+  useEffect(() => {
+    if (screen !== "browse") return;
+    setLoadingGames(true);
+    getSocket().emit("list_games", { playerToken: getPlayerToken() });
+  }, [screen]);
+
   // ── Lobby actions ─────────────────────────────────────────────────────────
+  function refreshGamesList() {
+    setLoadingGames(true);
+    getSocket().emit("list_games", { playerToken: getPlayerToken() });
+  }
+
+  function handleJoinFromBrowse(code) {
+    if (!name.trim()) { setError("Enter your name first"); return; }
+    localStorage.setItem("manhunt_name", name.trim());
+    localStorage.setItem("manhunt_last_room", code);
+    setError("");
+    getSocket().emit("join_room", {
+      code,
+      name: name.trim(),
+      playerToken: getPlayerToken(),
+    });
+  }
+
   function handleCreate() {
     if (!name.trim()) { setError("Enter your name first"); return; }
     localStorage.setItem("manhunt_name", name.trim());
@@ -371,9 +463,80 @@ export function OnlineFlow({ onPlayLocal }) {
           <button onClick={onPlayLocal} style={btn("#222", "#fff", { border: "1px solid #444" })}>
             Play Locally
           </button>
-          <button onClick={() => setScreen("join")} style={btn("#1565c0", "#fff")}>
+          <button onClick={() => setScreen("browse")} style={btn("#1565c0", "#fff")}>
             Play Online
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === "browse") {
+    return (
+      <div style={{ minHeight: "100vh", fontFamily: "system-ui", padding: 20, maxWidth: 560, margin: "0 auto" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+          <button onClick={() => { setScreen("menu"); setError(""); }}
+            style={btn("transparent", "#555", { border: "1px solid #ccc", padding: "6px 12px", fontSize: 13 })}>
+            ← Back
+          </button>
+          <h2 style={{ margin: 0 }}>Game Lobby</h2>
+          <button onClick={refreshGamesList} disabled={loadingGames}
+            style={btn("transparent", "#555", { border: "1px solid #ccc", padding: "6px 12px", fontSize: 13, marginLeft: "auto" })}>
+            {loadingGames ? "…" : "↻ Refresh"}
+          </button>
+        </div>
+
+        {/* Name + create */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <input style={{ ...inputStyle, flex: 1 }} value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Your name" maxLength={20} />
+          <button onClick={handleCreate} style={btn("#1565c0", "#fff")}>+ Create</button>
+        </div>
+        {error && <div style={{ color: "#ef5350", fontSize: 14, marginBottom: 12 }}>{error}</div>}
+
+        {/* Your Games */}
+        {myGames.length > 0 && (
+          <div style={{ marginTop: 20, marginBottom: 24 }}>
+            <h3 style={{ margin: "0 0 10px", fontSize: 15, color: "#333" }}>Your Games</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {myGames.map((g) => (
+                <GameCard key={g.code} game={g} isMine onJoin={() => handleJoinFromBrowse(g.code)} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Open Lobbies */}
+        <div style={{ marginTop: myGames.length ? 0 : 20 }}>
+          <h3 style={{ margin: "0 0 10px", fontSize: 15, color: "#333" }}>Open Lobbies</h3>
+          {loadingGames ? (
+            <div style={{ color: "#999", fontSize: 14, padding: "12px 0" }}>Loading…</div>
+          ) : openLobbies.length === 0 ? (
+            <div style={{ color: "#999", fontSize: 14, padding: "12px 0" }}>
+              No open lobbies right now — create one above!
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {openLobbies.map((g) => (
+                <GameCard key={g.code} game={g} onJoin={() => handleJoinFromBrowse(g.code)} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Join by code fallback */}
+        <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid #eee" }}>
+          <div style={{ fontSize: 13, color: "#888", marginBottom: 8 }}>Have a code? Join directly:</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              style={{ ...inputStyle, flex: 1, fontFamily: "monospace", letterSpacing: 4, textTransform: "uppercase" }}
+              value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              placeholder="CODE" maxLength={5}
+              onKeyDown={(e) => e.key === "Enter" && handleJoin()} />
+            <button onClick={handleJoin} style={btn("#1565c0", "#fff")}>Join →</button>
+          </div>
         </div>
       </div>
     );

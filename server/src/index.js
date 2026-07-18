@@ -18,6 +18,7 @@ import {
   removeBotFromRoom,
   getAllRooms,
   registerRoom,
+  listGamesForSocket,
 } from "./rooms.js";
 import { chooseBotPath } from "./bot.js";
 import { initDb, loadAllRooms } from "./db.js";
@@ -300,6 +301,17 @@ io.on("connection", (socket) => {
     if (readyCount >= totalCount) {
       clearTurnTimer(room);
       broadcastTurnResult(room);
+    }
+  });
+
+  // ── Game browser ──────────────────────────────────────────────────────────
+  socket.on("list_games", async ({ playerToken } = {}) => {
+    try {
+      const result = await listGamesForSocket(playerToken);
+      socket.emit("games_list", result);
+    } catch (err) {
+      console.error("[list_games] error:", err);
+      socket.emit("games_list", { myGames: [], openLobbies: [] });
     }
   });
 

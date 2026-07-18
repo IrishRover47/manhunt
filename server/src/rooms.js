@@ -6,7 +6,7 @@ import { CLASSES } from "./game/constants.js";
 import { findSpawn } from "./game/spawn.js";
 import { computeVisible } from "./game/vision.js";
 import { resolveTurn } from "./game/resolver.js";
-import { saveRoom, deleteRoom, loadRoomByCode, upsertPlayerIdentity } from "./db.js";
+import { saveRoom, deleteRoom, loadRoomByCode, upsertPlayerIdentity, serializeRoom, listRoomsForPlayer, listOpenLobbies } from "./db.js";
 
 const PERK_TYPES = ["OMNISCIENCE", "STAMINA_REFILL", "EXTENDED_VISION", "FREE_SPRINT"];
 const PERK_COOLDOWN = 5;
@@ -520,6 +520,49 @@ export function removeBotFromRoom(code, hostSocketId, botId) {
   room.players.splice(idx, 1);
   persist(room);
   return room;
+}
+
+// ── Game browser ─────────────────────────────────────────────────────────────
+
+function roomSummary(rawData, playerToken) {
+  const live = rooms.get(rawData.code);
+  const pendingPaths = live?.pendingPaths ?? new Map(Object.entries(rawData.pendingPaths ?? {}));
+  const players = rawData.players ?? [];
+  return {
+    code: rawData.code,
+    status: rawData.status,
+    mapKey: rawData.mapKey,
+    turn: rawData.gameState?.turn ?? null,
+    turnLimit: rawData.turnLimit,
+    players: players.map((p) => ({ name: p.name, role: p.role ?? null, isBot: !!p.isBot })),
+    myRole: players.find((p) => p.id === playerToken)?.role ?? null,
+    hasSubmitted: pendingPaths.has(playerToken),
+    lastTurnAt: rawData.gameState?.lastTurnAt ?? null,
+  };
+}
+
+export async function listGamesForSocket(playerToken) {
+  const [myRawRooms, openRawRooms] = await Promise.all([
+    listRoomsForPlayer(playerToken),
+    listOpenLobbies(playerToken),
+  ]);
+
+  // Also include in-memory rooms not yet flushed to DB (e.g. just created).
+  const dbCodes = new Set([...myRawRooms, ...openRawRooms].map((d) => d.code));
+  for (const room of rooms.values()) {
+    if (dbCodes.has(room.code) || room.status === "done") continue;
+    const isMyGame = room.players.some((p) => p.id === playerToken);
+    if (isMyGame) {
+      myRawRooms.push(serializeRoom(room));
+    } else if (room.status === "lobby" && room.players.length < 6) {
+      openRawRooms.push(serializeRoom(room));
+    }
+  }
+
+  return {
+    myGames: myRawRooms.map((d) => roomSummary(d, playerToken)),
+    openLobbies: openRawRooms.map((d) => roomSummary(d, playerToken)),
+  };
 }
 
 // ── Reconnect state ───────────────────────────────────────────────────────────

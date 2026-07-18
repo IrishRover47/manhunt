@@ -128,6 +128,52 @@ export async function getPlayerIdentity(token) {
   }
 }
 
+// ── Game listing ─────────────────────────────────────────────────────────────
+
+export async function listRoomsForPlayer(playerToken) {
+  const db = getPool();
+  if (!db) return [];
+  try {
+    const result = await db.query(
+      `SELECT data FROM rooms
+       WHERE data->>'status' != 'done'
+       AND EXISTS (
+         SELECT 1 FROM jsonb_array_elements(data->'players') AS p
+         WHERE p->>'id' = $1
+       )
+       ORDER BY updated_at DESC`,
+      [playerToken]
+    );
+    return result.rows.map((r) => r.data);
+  } catch (err) {
+    console.error("[db] listRoomsForPlayer error:", err.message);
+    return [];
+  }
+}
+
+export async function listOpenLobbies(excludePlayerToken) {
+  const db = getPool();
+  if (!db) return [];
+  try {
+    const result = await db.query(
+      `SELECT data FROM rooms
+       WHERE data->>'status' = 'lobby'
+       AND jsonb_array_length(data->'players') < 6
+       AND NOT EXISTS (
+         SELECT 1 FROM jsonb_array_elements(data->'players') AS p
+         WHERE p->>'id' = $1
+       )
+       ORDER BY updated_at DESC
+       LIMIT 20`,
+      [excludePlayerToken]
+    );
+    return result.rows.map((r) => r.data);
+  } catch (err) {
+    console.error("[db] listOpenLobbies error:", err.message);
+    return [];
+  }
+}
+
 // ── Serialization ─────────────────────────────────────────────────────────────
 // Map objects (pendingPaths) and ephemeral fields (socketId, timer refs)
 // need special handling.
